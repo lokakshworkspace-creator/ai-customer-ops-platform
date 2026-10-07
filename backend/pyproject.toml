@@ -10,6 +10,9 @@ dependencies = [
     "pydantic-settings>=2.4",
     "structlog>=24.1",
     "redis>=5.0",
+    "alembic>=1.13",
+    "pyjwt>=2.8",
+    "argon2-cffi>=23.1",
 ]
 
 [project.optional-dependencies]
