@@ -1,0 +1,114 @@
+[
+  {
+    "id": "R1",
+    "desc": "REQUESTED: remove UNIQUE(requested_by, idempotency_key)",
+    "file": "app/db/migrations/versions/0002_phase2_refunds_outbox_policy.py",
+    "old": "    op.create_unique_constraint(\n        op.f(\"uq_refunds_requested_by_idempotency_key\"),\n        \"refunds\",\n        [\"requested_by\", \"idempotency_key\"],\n    )\n",
+    "new": "    op.create_index(\"ix_refunds_requested_by_key_nonunique\", \"refunds\", [\"requested_by\", \"idempotency_key\"])\n",
+    "tests": "app/tests/test_refunds_concurrency.py app/tests/test_refunds_api.py"
+  },
+  {
+    "id": "R2",
+    "desc": "REQUESTED: drop the order row lock",
+    "file": "app/db/locking.py",
+    "old": "stmt.with_for_update(key_share=True, of=Order).execution_options",
+    "new": "stmt.execution_options",
+    "tests": "app/tests/test_refunds_concurrency.py"
+  },
+  {
+    "id": "R3",
+    "desc": "REQUESTED: ignore request_hash (key reuse not detected)",
+    "file": "app/tools/handlers/refunds.py",
+    "old": "    if existing.request_hash != req_hash:\n",
+    "new": "    if False:\n",
+    "tests": "app/tests/test_refunds_api.py app/tests/test_refunds_concurrency.py"
+  },
+  {
+    "id": "R4",
+    "desc": "REQUESTED: skip the policy gate in the refund path",
+    "file": "app/tools/handlers/refunds.py",
+    "old": "        policy = evaluate_refund_request(rules, ctx.actor, facts, ctx.now)\n",
+    "new": "        policy = PolicyResult(PolicyDecision.ALLOW, ReasonCode.REFUND_ALLOWED, \"gate skipped\", (ReasonCode.REFUND_ALLOWED,))\n",
+    "tests": "app/tests/test_refunds_api.py"
+  },
+  {
+    "id": "R5",
+    "desc": "REQUESTED: provider key = the user's key, not refund-<uuid>",
+    "file": "app/modules/refunds/service.py",
+    "old": "            idempotency_key=provider_key_for(refund_id),\n",
+    "new": "            idempotency_key=refund.idempotency_key,\n",
+    "tests": "app/tests/test_refunds_api.py"
+  },
+  {
+    "id": "R6",
+    "desc": "REQUESTED: outbox event written outside the refund transaction",
+    "file": "app/tools/handlers/refunds.py",
+    "old": "        refund_service.emit(\n            session, refund, st.customer_id, EventType.REFUND_REQUESTED, request_id=ctx.request_id\n        )\n",
+    "new": "        async with session.__class__(bind=session.bind, expire_on_commit=False) as other:\n            refund_service.emit(\n                other, refund, st.customer_id, EventType.REFUND_REQUESTED, request_id=ctx.request_id\n            )\n            await other.commit()\n",
+    "tests": "app/tests/test_refunds_concurrency.py"
+  },
+  {
+    "id": "X1",
+    "desc": "extra: drop the customer (user) row lock",
+    "file": "app/tools/handlers/refunds.py",
+    "old": "        await locking.lock_user(session, order.user_id)\n",
+    "new": "        pass\n",
+    "tests": "app/tests/test_refunds_concurrency.py"
+  },
+  {
+    "id": "X2",
+    "desc": "extra: provider call made inside an open transaction",
+    "file": "app/modules/refunds/service.py",
+    "old": "    await session.commit()  # nothing stays open across the provider call\n",
+    "new": "    pass\n",
+    "tests": "app/tests/test_refunds_concurrency.py"
+  },
+  {
+    "id": "X3",
+    "desc": "extra: hash not canonical (500 vs 500.00 differ)",
+    "file": "app/modules/refunds/hashing.py",
+    "old": "    return format(amount.normalize(), \"f\")\n",
+    "new": "    return str(amount)\n",
+    "tests": "app/tests/test_refund_hashing.py app/tests/test_refunds_api.py"
+  },
+  {
+    "id": "X4",
+    "desc": "extra: velocity also counts failed and rejected refunds",
+    "file": "app/policy/rules.yaml",
+    "old": "velocity_counted_statuses: [pending_approval, processing, succeeded]",
+    "new": "velocity_counted_statuses: [pending_approval, processing, succeeded, failed, rejected]",
+    "tests": "app/tests/test_refunds_api.py app/tests/test_refund_facts.py"
+  },
+  {
+    "id": "X5",
+    "desc": "extra: finalise does not re-check the refund is still processing",
+    "file": "app/modules/refunds/service.py",
+    "old": "    if refund.status != RefundStatus.processing:  # someone else finished it first\n",
+    "new": "    if False:\n",
+    "tests": "app/tests/test_refund_reconcile.py"
+  },
+  {
+    "id": "X6",
+    "desc": "extra: self-approval allowed",
+    "file": "app/policy/engine.py",
+    "old": "        and requested_by == actor.id\n",
+    "new": "        and False\n",
+    "tests": "app/tests/test_approvals_api.py"
+  },
+  {
+    "id": "X7",
+    "desc": "extra: order lock ignores the owner (any customer's order)",
+    "file": "app/db/locking.py",
+    "old": "        stmt = stmt.where(Order.user_id == owner_id)\n",
+    "new": "        pass\n",
+    "tests": "app/tests/test_refunds_api.py"
+  },
+  {
+    "id": "X8",
+    "desc": "extra: reserved amount ignores pending approvals (reservations)",
+    "file": "app/policy/rules.yaml",
+    "old": "reserving_statuses: [pending_approval, processing, succeeded]",
+    "new": "reserving_statuses: [processing, succeeded]",
+    "tests": "app/tests/test_refunds_api.py"
+  }
+]

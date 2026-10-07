@@ -1,0 +1,82 @@
+[
+  {
+    "id": "T1",
+    "desc": "executor skips the policy gate (DENY is executed)",
+    "file": "app/tools/executor.py",
+    "old": "            if policy.is_deny:\n",
+    "new": "            if False:\n",
+    "tests": "app/tests/test_tool_executor.py"
+  },
+  {
+    "id": "T2",
+    "desc": "tool inputs ignore unknown fields (user_id accepted)",
+    "file": "app/tools/schemas.py",
+    "old": "model_config = ConfigDict(extra=\"forbid\", frozen=True)",
+    "new": "model_config = ConfigDict(extra=\"ignore\", frozen=True)",
+    "tests": "app/tests/test_tool_executor.py app/tests/test_tool_registry.py"
+  },
+  {
+    "id": "T3",
+    "desc": "executor skips the authorization (role) stage",
+    "file": "app/tools/executor.py",
+    "old": "        if ctx.actor.role not in spec.required_roles:\n",
+    "new": "        if False:\n",
+    "tests": "app/tests/test_tool_executor.py"
+  },
+  {
+    "id": "T4",
+    "desc": "denied calls are not written to tool_calls/audit_logs",
+    "file": "app/tools/executor.py",
+    "old": "        await self._finish(\n            session, ctx, call_id, spec.name, status=ToolCallStatus.denied, policy=policy\n        )\n",
+    "new": "",
+    "tests": "app/tests/test_tool_executor.py"
+  },
+  {
+    "id": "T5",
+    "desc": "start row is not committed before the pipeline runs",
+    "file": "app/tools/executor.py",
+    "old": "        await session.commit()  # T0: the trace exists before anything can go wrong\n",
+    "new": "        await session.flush()\n",
+    "tests": "app/tests/test_tool_executor.py"
+  },
+  {
+    "id": "T6",
+    "desc": "stored arguments are not size-capped",
+    "file": "app/tools/executor.py",
+    "old": "arguments=cap_json(arguments, MAX_ARGUMENTS_BYTES),",
+    "new": "arguments=cap_json(arguments, 10**9),",
+    "tests": "app/tests/test_tool_executor.py"
+  },
+  {
+    "id": "T7",
+    "desc": "failed executions are not rolled back (unexpected error)",
+    "file": "app/tools/executor.py",
+    "old": "        except Exception as exc:\n            await session.rollback()\n",
+    "new": "        except Exception as exc:\n            await session.flush()\n",
+    "tests": "app/tests/test_tool_executor.py"
+  },
+  {
+    "id": "T8",
+    "desc": "admin-only tools may be agent-visible",
+    "file": "app/tools/registry.py",
+    "old": "        if admin_only and spec.agent_visible:\n",
+    "new": "        if False:\n",
+    "tests": "app/tests/test_tool_registry.py"
+  },
+  {
+    "id": "T9",
+    "desc": "ticket read ignores the owner scope (any order id works)",
+    "file": "app/tools/handlers/tickets.py",
+    "old": "            if order is None:  # not yours is the same as not found\n",
+    "new": "            if False:\n",
+    "tests": "app/tests/test_tool_executor.py"
+  },
+  {
+    "id": "T10",
+    "desc": "orders service shows everyone's orders to everyone",
+    "file": "app/modules/orders/service.py",
+    "old": "return None if actor.role == Role.admin else actor.id",
+    "new": "return None",
+    "tests": "app/tests/test_tool_executor.py"
+  }
+]
