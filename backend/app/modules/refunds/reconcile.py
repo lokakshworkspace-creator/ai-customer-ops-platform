@@ -14,8 +14,23 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import Refund
 from app.db.models.enums import RefundStatus
-from app.modules.refunds.payments import PaymentProvider
+from app.modules.refunds.payments import PaymentProvider, SimulatedPaymentProvider
 from app.modules.refunds.service import payout_flow
+
+SIMULATED_REFUSAL = (
+    "Refusing to reconcile with the SIMULATED payment provider.\n"
+    "Its idempotency ledger lives in this process's memory, so a fresh process has an empty ledger "
+    "and would pay a stuck refund out AGAIN (the original payout is unknown to it). Reconciling "
+    "is only safe against a provider that remembers payouts by key, i.e. a real one.\n"
+    "For local development only, pass --allow-simulated to accept that."
+)
+
+
+def reconcile_refusal(provider: PaymentProvider, *, allow_simulated: bool) -> str | None:
+    """A reason NOT to run a reconcile with `provider`, or None if it is fine to proceed."""
+    if isinstance(provider, SimulatedPaymentProvider) and not allow_simulated:
+        return SIMULATED_REFUSAL
+    return None
 
 
 @dataclass(frozen=True, slots=True)
