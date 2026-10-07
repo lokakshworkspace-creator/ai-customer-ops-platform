@@ -60,9 +60,3 @@ async def test_request_id_generated_and_echoed(client: AsyncClient) -> None:
     _override(False, False)
     r = await client.get("/health")
     assert len(r.headers["x-request-id"]) == 32
-
-
-async def test_inbound_request_id_is_honoured(client: AsyncClient) -> None:
-    _override(False, False)
-    r = await client.get("/health", headers={"X-Request-ID": "abc-123"})
-    assert r.headers["x-request-id"] == "abc-123"

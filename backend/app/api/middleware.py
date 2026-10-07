@@ -1,3 +1,4 @@
+import re
 import time
 import uuid
 
@@ -6,14 +7,16 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 REQUEST_ID_HEADER = "X-Request-ID"
-_MAX_INBOUND_ID_LEN = 128
+# fullmatch, not ^...$: "$" would also accept a trailing newline
+_VALID_REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{8,64}")
 
 log = structlog.get_logger(__name__)
 
 
 class RequestIDMiddleware:
-    """Assigns a request_id (or honours a sane inbound one), binds it to every log line
-    for the request, echoes it in the response header, and logs one access line."""
+    """Assigns a request_id, binds it to every log line for the request, echoes it in the
+    response header, and logs one access line. An inbound X-Request-ID is honoured only if
+    it matches [A-Za-z0-9_-]{8,64}; anything else is replaced with a fresh one."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -24,11 +27,7 @@ class RequestIDMiddleware:
             return
 
         inbound = Headers(scope=scope).get(REQUEST_ID_HEADER, "")
-        request_id = (
-            inbound
-            if inbound and len(inbound) <= _MAX_INBOUND_ID_LEN and inbound.isprintable()
-            else uuid.uuid4().hex
-        )
+        request_id = inbound if _VALID_REQUEST_ID.fullmatch(inbound) else uuid.uuid4().hex
         scope.setdefault("state", {})["request_id"] = request_id
 
         structlog.contextvars.clear_contextvars()
