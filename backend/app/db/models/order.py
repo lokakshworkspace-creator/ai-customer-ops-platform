@@ -21,7 +21,7 @@ class Order(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         str_enum(OrderStatus, "order_status"), default=OrderStatus.pending
     )
     total_amount: Mapped[Decimal]
-    currency: Mapped[str] = mapped_column(String(3), default="USD")
+    currency: Mapped[str] = mapped_column(String(3), default="INR")
     placed_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     items: Mapped[list["OrderItem"]] = relationship(

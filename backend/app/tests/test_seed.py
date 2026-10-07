@@ -1,6 +1,8 @@
 import importlib.util
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import func, select
@@ -82,3 +84,40 @@ async def test_seed_is_idempotent(db_session: AsyncSession, seed_module) -> None
     assert await seed_module.seed(db_session) is False
     assert await db_session.scalar(select(func.count()).select_from(User)) == 3
     assert await db_session.scalar(select(func.count()).select_from(Order)) == 10
+
+
+async def test_seed_uses_rupees_in_the_expected_range(
+    db_session: AsyncSession, seed_module
+) -> None:
+    await seed_module.seed(db_session)
+    orders = list(await db_session.scalars(select(Order)))
+    payments = list(await db_session.scalars(select(Payment)))
+    assert {o.currency for o in orders} == {"INR"}
+    assert {p.currency for p in payments} == {"INR"}
+    prices = list(await db_session.scalars(select(OrderItem.unit_price)))
+    assert min(prices) == Decimal("299.00")
+    assert max(prices) <= Decimal("4999.00")
+
+
+async def test_seed_covers_the_policy_scenarios(db_session: AsyncSession, seed_module) -> None:
+    await seed_module.seed(db_session)
+    orders = list(await db_session.scalars(select(Order)))
+    paid_order_ids = set(await db_session.scalars(select(Payment.order_id)))
+    delivered = [o for o in orders if o.status == OrderStatus.delivered]
+
+    assert any(o.total_amount <= 500 for o in delivered), "delivered order <= Rs.500"
+    assert any(o.total_amount > 500 for o in delivered), "delivered order > Rs.500"
+
+    cutoff = datetime.now(UTC) - timedelta(days=45)
+    assert any(abs(o.placed_at - cutoff) < timedelta(hours=1) for o in orders), "45-day-old order"
+
+    assert any(o.status == OrderStatus.cancelled for o in orders)
+    pending = [o for o in orders if o.status == OrderStatus.pending]
+    assert pending and all(o.id not in paid_order_ids for o in pending), "unpaid pending order"
+
+
+async def test_seed_refuses_to_run_in_prod(monkeypatch, seed_module, capsys) -> None:
+    monkeypatch.setattr(seed_module, "get_settings", lambda: SimpleNamespace(is_prod=True))
+    # Returns before touching the database.
+    assert await seed_module.main() == 1
+    assert "Refusing to seed" in capsys.readouterr().err

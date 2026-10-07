@@ -34,9 +34,10 @@ ALLOW | REQUIRE_APPROVAL | DENY, always with a reason (written to audit_logs).
 - Write tests alongside each feature. Security-relevant behavior (authz, idempotency, policy) must have tests.
 - Small commits per feature. Don't build ahead of the current phase.
 - Ask before adding new dependencies or changing the golden rules.
+- Alembic autogenerate duplicates CHECK constraints on enum columns; always hand-review new migrations so each enum has exactly one named CHECK.
 
 ## Phases
 0 Foundation · 1 Core domain + auth · 2 Tools + policy + refunds (+ outbox relay/consumers)
 3 Agent + LLM + first UI · 4 RAG · 5 Human approval + events · 6 Resilience, observability, evals · 7 Polish
 
-## Current phase: 0-1
+## Current phase: 1 (core domain + auth). Phase 0 is done.

@@ -37,7 +37,7 @@ async def create_order(
     status: OrderStatus = OrderStatus.paid,
     items: list[tuple[str, int, str]] | None = None,
 ) -> Order:
-    order = Order(user_id=user.id, status=status, total_amount=Decimal(total), currency="USD")
+    order = Order(user_id=user.id, status=status, total_amount=Decimal(total), currency="INR")
     for sku, qty, price in items or [("SKU-1", 2, "24.99")]:
         order.items.append(
             OrderItem(sku=sku, name=f"Item {sku}", quantity=qty, unit_price=Decimal(price))

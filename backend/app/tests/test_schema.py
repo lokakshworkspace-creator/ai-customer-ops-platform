@@ -81,7 +81,7 @@ async def test_status_check_constraint_rejects_unknown_value(db_session: AsyncSe
             await db_session.execute(
                 text(
                     "INSERT INTO orders (id, user_id, status, total_amount, currency) "
-                    "VALUES (:id, :uid, 'bogus', 1.00, 'USD')"
+                    "VALUES (:id, :uid, 'bogus', 1.00, 'INR')"
                 ),
                 {"id": uuid.uuid4(), "uid": user.id},
             )
@@ -112,7 +112,7 @@ async def test_refund_idempotency_key_is_not_null(db_session: AsyncSession) -> N
                 text(
                     "INSERT INTO refunds (id, idempotency_key, payment_id, order_id,"
                     " requested_by, amount, currency, status)"
-                    " VALUES (:id, NULL, :p, :o, :u, 5.00, 'USD', 'pending')"
+                    " VALUES (:id, NULL, :p, :o, :u, 5.00, 'INR', 'pending')"
                 ),
                 {"id": uuid.uuid4(), "p": payment.id, "o": order.id, "u": admin.id},
             )

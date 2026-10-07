@@ -28,30 +28,39 @@ ADMIN = ("admin@example.com", "Ada Admin")
 ALICE = ("alice@example.com", "Alice Customer")
 BOB = ("bob@example.com", "Bob Customer")
 
+CURRENCY = "INR"
+
+# Prices in rupees. Phase 2 policy thresholds are in rupees too (auto-approve <= 500).
 CATALOG: dict[str, tuple[str, Decimal]] = {
-    "KB-001": ("Mechanical Keyboard", Decimal("89.99")),
-    "MS-002": ("Wireless Mouse", Decimal("29.50")),
-    "HB-003": ("USB-C Hub", Decimal("45.00")),
-    "MN-004": ("27in Monitor", Decimal("249.00")),
-    "CB-005": ("HDMI Cable", Decimal("9.99")),
-    "HP-006": ("Headphones", Decimal("129.00")),
-    "WC-007": ("Webcam", Decimal("59.95")),
-    "ST-008": ("Laptop Stand", Decimal("34.90")),
+    "CB-005": ("HDMI Cable", Decimal("299.00")),
+    "MS-002": ("Wireless Mouse", Decimal("799.00")),
+    "ST-008": ("Laptop Stand", Decimal("1299.00")),
+    "HB-003": ("USB-C Hub", Decimal("1499.00")),
+    "WC-007": ("Webcam", Decimal("1999.00")),
+    "KB-001": ("Mechanical Keyboard", Decimal("2499.00")),
+    "HP-006": ("Headphones", Decimal("3499.00")),
+    "MN-004": ("27in Monitor", Decimal("4999.00")),
 }
 
 S = OrderStatus
-# (customer, status, [(sku, qty), ...], days_ago)
+# (customer, status, [(sku, qty), ...], days_ago). Deliberately covers the cases the
+# Phase 2 policy engine and the tests care about:
+#   - delivered, total <= 500        (#1)
+#   - delivered, total > 500         (#2, #7)
+#   - placed 45 days ago             (#7)
+#   - cancelled                      (#6, #10)
+#   - pending / unpaid (no payment)  (#5)
 ORDERS: list[tuple[tuple[str, str], OrderStatus, list[tuple[str, int]], int]] = [
-    (ALICE, S.delivered, [("KB-001", 1), ("MS-002", 1)], 40),
-    (ALICE, S.delivered, [("MN-004", 1), ("CB-005", 2)], 25),
-    (ALICE, S.shipped, [("HP-006", 1)], 6),
-    (ALICE, S.paid, [("WC-007", 1), ("ST-008", 1)], 2),
-    (ALICE, S.pending, [("HB-003", 1)], 0),
-    (ALICE, S.cancelled, [("CB-005", 3)], 12),
-    (BOB, S.delivered, [("HP-006", 2)], 33),
-    (BOB, S.shipped, [("KB-001", 1), ("HB-003", 1)], 4),
-    (BOB, S.paid, [("MN-004", 2)], 1),
-    (BOB, S.cancelled, [("MS-002", 1)], 18),
+    (ALICE, S.delivered, [("CB-005", 1)], 40),  # 1: 299
+    (ALICE, S.delivered, [("KB-001", 1), ("MS-002", 1)], 25),  # 2: 3298
+    (ALICE, S.shipped, [("HP-006", 1)], 6),  # 3: 3499
+    (ALICE, S.paid, [("WC-007", 1), ("ST-008", 1)], 2),  # 4: 3298
+    (ALICE, S.pending, [("HB-003", 1)], 0),  # 5: 1499, unpaid
+    (ALICE, S.cancelled, [("CB-005", 2)], 12),  # 6: 598
+    (BOB, S.delivered, [("MN-004", 1)], 45),  # 7: 4999, 45 days old
+    (BOB, S.shipped, [("KB-001", 1), ("HB-003", 1)], 4),  # 8: 3998
+    (BOB, S.paid, [("MS-002", 1), ("CB-005", 1)], 1),  # 9: 1098
+    (BOB, S.cancelled, [("ST-008", 1)], 18),  # 10: 1299
 ]
 
 PAID_STATUSES = {S.paid, S.shipped, S.delivered}
@@ -81,7 +90,7 @@ async def seed(session: AsyncSession, password: str = DEFAULT_PASSWORD) -> bool:
             user_id=users[email].id,
             status=status,
             total_amount=total,
-            currency="USD",
+            currency=CURRENCY,
             placed_at=now - timedelta(days=days_ago),
             items=items,
         )
@@ -92,7 +101,7 @@ async def seed(session: AsyncSession, password: str = DEFAULT_PASSWORD) -> bool:
                 Payment(
                     order_id=order.id,
                     amount=total,
-                    currency="USD",
+                    currency=CURRENCY,
                     status=PaymentStatus.succeeded,
                     provider="simulated",
                     provider_ref=f"sim_{n:04d}",

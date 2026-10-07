@@ -25,7 +25,7 @@ class Refund(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     requested_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     amount: Mapped[Decimal]
-    currency: Mapped[str] = mapped_column(String(3), default="USD")
+    currency: Mapped[str] = mapped_column(String(3), default="INR")
     status: Mapped[RefundStatus] = mapped_column(
         str_enum(RefundStatus, "refund_status"), default=RefundStatus.pending
     )

@@ -16,7 +16,7 @@ class Payment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("orders.id", ondelete="RESTRICT"), index=True
     )
     amount: Mapped[Decimal]
-    currency: Mapped[str] = mapped_column(String(3), default="USD")
+    currency: Mapped[str] = mapped_column(String(3), default="INR")
     status: Mapped[PaymentStatus] = mapped_column(
         str_enum(PaymentStatus, "payment_status"), default=PaymentStatus.pending
     )
