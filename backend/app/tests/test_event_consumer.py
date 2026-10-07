@@ -268,19 +268,25 @@ async def test_poison_messages_are_dead_lettered_without_crashing_or_blocking(
     unexpected = valid_envelope_bytes("refund.requested").replace(
         b'"data":{', b'"data":{"email":"a@b.c",'
     )
-    values = [v for _, v in POISON] + [unexpected, event("refund.completed", good_agg)]
+    # The LAST message is poison too: committing a later offset implicitly covers earlier ones, so
+    # only a trailing poison message proves that dead-lettering itself commits the offset.
+    trailing = b"trailing garbage {"
+    values = [v for _, v in POISON] + [unexpected, event("refund.completed", good_agg), trailing]
     await produce(kafka_env, kafka_env.refund_topic, *values, key=b"same-partition")
     rec = Recorder()
     await asyncio.wait_for(make_consumer(committed_db, kafka_env, rec).run(once=True), 90)
 
-    assert rec.types == ["refund.completed"]  # the good message after nine bad ones was processed
-    assert await committed_total(kafka_env) == len(
-        values
-    )  # every offset committed: partition not stuck
+    assert rec.types == ["refund.completed"]  # the good message among nine bad ones was processed
+    assert await committed_total(kafka_env) == len(values)  # every offset committed: not stuck
 
     dead = await read_topic(kafka_env, kafka_env.dlq_topic, expected=len(values) - 1)
     reasons = [dict((k, v.decode()) for k, v in m.headers)["x-dlq-reason"] for m in dead]
-    assert reasons == [r for r, _ in POISON] + ["unexpected_fields"]  # in original order
+    assert reasons == [r for r, _ in POISON] + ["unexpected_fields", "invalid_json"]  # in order
+
+    # A restart must not re-dead-letter anything (nothing is left uncommitted).
+    await asyncio.wait_for(make_consumer(committed_db, kafka_env, Recorder()).run(once=True), 90)
+    again = await read_topic(kafka_env, kafka_env.dlq_topic, settle=3.0)
+    assert len(again) == len(values) - 1, "a poison message was dead-lettered again after a restart"
     first = dict((k, v.decode()) for k, v in dead[0].headers)
     assert first["x-original-topic"] == kafka_env.refund_topic and first["x-original-offset"] == "0"
     assert first["x-consumer"] == NAME
