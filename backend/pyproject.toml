@@ -44,7 +44,12 @@ asyncio_default_test_loop_scope = "session"
 testpaths = ["app/tests"]
 
 [tool.ruff.lint.flake8-bugbear]
-extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Security"]
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Security",
+    "app.api.deps.require_role",
+]
 
 [tool.ruff.lint.per-file-ignores]
 "app/db/migrations/versions/*" = ["E501", "I001", "UP007"]

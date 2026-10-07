@@ -1,0 +1,36 @@
+"""Helpers for minting real and forged JWTs in tests."""
+
+import uuid
+import warnings
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+import jwt
+
+from app.core.config import get_settings
+
+
+def forge_token(
+    sub: uuid.UUID | str | None,
+    *,
+    secret: str | None = None,
+    algorithm: str = "HS256",
+    expires_in: timedelta | None = timedelta(minutes=5),
+    extra: dict[str, Any] | None = None,
+) -> str:
+    """Build a JWT. `sub=None` / `expires_in=None` omit that claim entirely."""
+    now = datetime.now(UTC)
+    payload: dict[str, Any] = {"iat": now}
+    if sub is not None:
+        payload["sub"] = str(sub)
+    if expires_in is not None:
+        payload["exp"] = now + expires_in
+    payload.update(extra or {})
+    key = None if algorithm == "none" else (secret or get_settings().jwt_secret)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # e.g. HS512 with a short key: fine for a forgery
+        return jwt.encode(payload, key, algorithm=algorithm)
+
+
+def bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}

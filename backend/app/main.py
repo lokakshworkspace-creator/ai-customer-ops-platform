@@ -6,7 +6,7 @@ from fastapi import FastAPI
 
 from app.api.deps import close_redis
 from app.api.middleware import RequestIDMiddleware
-from app.api.routers import health
+from app.api.routers import auth, health
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.session import get_engine
@@ -30,6 +30,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Ops Platform", version="0.1.0", lifespan=lifespan)
     app.add_middleware(RequestIDMiddleware)
     app.include_router(health.router)
+    app.include_router(auth.router)
     return app
 
 

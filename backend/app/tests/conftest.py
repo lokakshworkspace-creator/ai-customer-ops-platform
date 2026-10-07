@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
+from app.api.deps import get_session
 from app.core.config import get_settings
 from app.main import app
 
@@ -84,3 +85,16 @@ async def client() -> AsyncIterator[AsyncClient]:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
         app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def db_client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    """The real app, with its DB session replaced by the rollback-per-test session."""
+
+    async def _session() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_session] = _session
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        yield c
+    app.dependency_overrides.pop(get_session, None)
