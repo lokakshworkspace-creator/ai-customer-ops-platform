@@ -15,7 +15,7 @@ class Principal(Protocol):
     role: Role
 
 
-def _visible_to(actor: Principal) -> uuid.UUID | None:
+def owner_filter(actor: Principal) -> uuid.UUID | None:
     """The owner filter for `actor`: None (everything) only for an explicit admin.
 
     Allow-list, not deny-list: any other or future role sees only its own orders.
@@ -26,14 +26,12 @@ def _visible_to(actor: Principal) -> uuid.UUID | None:
 async def list_orders(
     session: AsyncSession, actor: Principal, *, limit: int, offset: int
 ) -> tuple[list[Order], int]:
-    return await repo.list_orders(session, user_id=_visible_to(actor), limit=limit, offset=offset)
+    return await repo.list_orders(session, user_id=owner_filter(actor), limit=limit, offset=offset)
 
 
-async def get_order(
-    session: AsyncSession, actor: Principal, order_id: uuid.UUID, *, lock: bool = False
-) -> Order | None:
+async def get_order(session: AsyncSession, actor: Principal, order_id: uuid.UUID) -> Order | None:
     """None means "not found *for this actor*": nonexistent and not-yours are the same."""
-    return await repo.get_order(session, order_id, user_id=_visible_to(actor), lock=lock)
+    return await repo.get_order(session, order_id, user_id=owner_filter(actor))
 
 
 async def cancel_order(session: AsyncSession, order: Order) -> None:

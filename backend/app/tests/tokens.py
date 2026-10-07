@@ -34,3 +34,10 @@ def forge_token(
 
 def bearer(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def auth_for(user_id: uuid.UUID) -> dict[str, str]:
+    """A real login-issued token (not forged): goes through the real get_current_user."""
+    from app.core.security import create_access_token
+
+    return bearer(create_access_token(user_id)[0])

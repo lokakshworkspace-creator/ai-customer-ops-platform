@@ -77,6 +77,7 @@ async def create_refund(
     request_hash: str | None = None,
     reason_code: str = "damaged",
     status: RefundStatus = RefundStatus.processing,
+    created_at: datetime | None = None,
 ) -> Refund:
     refund = Refund(
         idempotency_key=idempotency_key,
@@ -89,6 +90,8 @@ async def create_refund(
         reason_code=reason_code,
         status=status,
     )
+    if created_at is not None:
+        refund.created_at = created_at
     session.add(refund)
     await session.flush()
     return refund

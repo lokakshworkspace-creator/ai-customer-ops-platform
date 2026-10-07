@@ -35,13 +35,9 @@ async def get_order(
     order_id: uuid.UUID,
     *,
     user_id: uuid.UUID | None,
-    lock: bool = False,
 ) -> Order | None:
-    """`lock=True` takes a row lock (SELECT ... FOR UPDATE) on the order for the rest of the
-    transaction: used by mutating flows (cancel, refund) so concurrent changes serialise."""
+    """Read an order (never locks: mutating flows use app.db.locking.lock_order)."""
     stmt = select(Order).where(Order.id == order_id).options(selectinload(Order.items))
     if user_id is not None:
         stmt = stmt.where(Order.user_id == user_id)
-    if lock:
-        stmt = stmt.with_for_update(of=Order)
     return await session.scalar(stmt)

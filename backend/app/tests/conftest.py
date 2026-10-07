@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -8,12 +9,21 @@ from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.engine import URL, make_url
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
-from app.api.deps import get_session
+from app.api.deps import get_executor, get_session
 from app.core.config import get_settings
 from app.db.base import Base
 from app.main import app
+from app.modules.refunds.payments import SimulatedPaymentProvider
+from app.policy.rules import get_rules
+from app.tools.default import build_default_registry
+from app.tools.executor import ToolExecutor
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 TEST_DB_NAME = "ops_test"
@@ -122,3 +132,69 @@ async def db_client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
     app.dependency_overrides.pop(get_session, None)
+
+
+@dataclass
+class CommittedDB:
+    """Real, committed data over a pool of SEPARATE connections, for concurrency tests."""
+
+    engine: AsyncEngine
+    maker: async_sessionmaker[AsyncSession]
+
+
+@pytest.fixture
+async def committed_db(engine: AsyncEngine) -> AsyncIterator[CommittedDB]:
+    """Unlike `db_session` (one connection, rolled back), every session made from `maker` has its
+    own connection and COMMITS, so concurrent flows really contend for locks. Pool of 12+.
+    Tables are emptied before and after (test database only; see truncate_all's guards)."""
+    await truncate_all(engine)
+    pool = create_async_engine(_test_db_url(), pool_size=12, max_overflow=8)
+    try:
+        yield CommittedDB(pool, async_sessionmaker(pool, expire_on_commit=False))
+    finally:
+        await pool.dispose()
+        await truncate_all(engine)
+
+
+@pytest.fixture
+def provider() -> SimulatedPaymentProvider:
+    return SimulatedPaymentProvider()
+
+
+@pytest.fixture
+async def refund_client(
+    db_session: AsyncSession, provider: SimulatedPaymentProvider
+) -> AsyncIterator[AsyncClient]:
+    """The real app and the REAL auth dependency (no override of get_current_user); only the
+    database session (rollback-per-test) and the payment provider are swapped."""
+    executor = ToolExecutor(build_default_registry(get_rules(), provider))
+
+    async def _session() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_session] = _session
+    app.dependency_overrides[get_executor] = lambda: executor
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        yield c
+    app.dependency_overrides.pop(get_session, None)
+    app.dependency_overrides.pop(get_executor, None)
+
+
+@pytest.fixture
+async def committed_client(
+    committed_db: CommittedDB, provider: SimulatedPaymentProvider
+) -> AsyncIterator[AsyncClient]:
+    """The real app where EVERY REQUEST gets its own session and connection from the pool and
+    commits for real: concurrent requests genuinely contend for row locks."""
+    executor = ToolExecutor(build_default_registry(get_rules(), provider))
+
+    async def _session() -> AsyncIterator[AsyncSession]:
+        async with committed_db.maker() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = _session
+    app.dependency_overrides[get_executor] = lambda: executor
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        yield c
+    app.dependency_overrides.pop(get_session, None)
+    app.dependency_overrides.pop(get_executor, None)

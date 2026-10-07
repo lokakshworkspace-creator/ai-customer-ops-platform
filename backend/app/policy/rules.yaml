@@ -12,6 +12,9 @@ refund:
   refundable_statuses: [paid, delivered]
   velocity_window_days: 30
   velocity_max_refunds: 3       # a request that would make the customer's count in the window exceed this needs approval
+  # Which existing refunds count. Rejected and failed refunds never moved money, so they count for nothing.
+  reserving_statuses: [pending_approval, processing, succeeded]         # hold money against the order total
+  velocity_counted_statuses: [pending_approval, processing, succeeded]  # count toward the velocity limit
   valid_reasons:
     - damaged
     - defective

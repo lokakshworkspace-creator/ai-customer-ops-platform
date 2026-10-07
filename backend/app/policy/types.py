@@ -8,7 +8,7 @@ from decimal import Decimal
 from enum import StrEnum
 
 # Only the enum vocabulary is shared with the persistence layer; nothing here does I/O.
-from app.db.models.enums import OrderStatus, PolicyDecision, Role
+from app.db.models.enums import OrderStatus, PolicyDecision, RefundStatus, Role
 
 __all__ = [
     "Actor",
@@ -17,6 +17,7 @@ __all__ = [
     "PolicyDecision",
     "PolicyResult",
     "ReasonCode",
+    "RefundStatus",
     "RefundFacts",
     "Role",
 ]
@@ -32,6 +33,7 @@ class ReasonCode(StrEnum):
     TICKET_ALLOWED = "TICKET_ALLOWED"
     READ_ALLOWED = "READ_ALLOWED"
     ADMIN_ACTION_ALLOWED = "ADMIN_ACTION_ALLOWED"
+    IDEMPOTENT_REPLAY = "IDEMPOTENT_REPLAY"  # same Idempotency-Key + payload: original result
     # REQUIRE_APPROVAL
     REFUND_ABOVE_AUTO_LIMIT = "REFUND_ABOVE_AUTO_LIMIT"
     REFUND_VELOCITY = "REFUND_VELOCITY"

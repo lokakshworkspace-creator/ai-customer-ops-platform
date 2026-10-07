@@ -14,7 +14,7 @@ effects) runs after T1 has committed.
 
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import structlog
@@ -84,6 +84,7 @@ class ToolExecutor:
 
         spec = self.registry.get(tool_name)
         call_id = await self._log_start(session, ctx, tool_name, raw_args)
+        ctx = replace(ctx, tool_call_id=call_id)  # handlers can link rows to this call
         blog = log.bind(
             tool=tool_name,
             tool_call_id=str(call_id),
@@ -186,6 +187,7 @@ class ToolExecutor:
 
         data = dict(result.data)
         final_status, error_code, error = status, None, None
+        http_status = result.http_status
 
         # -- 5. after commit (external side effects) --------------------------------------
         if result.after_commit is not None:
@@ -193,8 +195,11 @@ class ToolExecutor:
                 after = await result.after_commit(session)
                 data.update(after.data)
                 final_status, error_code, error = after.status, after.error_code, after.error
+                if after.http_status is not None:
+                    http_status = after.http_status
             except Exception as exc:
                 blog.exception("tool_after_commit_error")
+                await session.rollback()  # the session may be mid-failed-transaction
                 final_status, error_code, error = (
                     ToolCallStatus.failed,
                     "POST_COMMIT_ERROR",
@@ -213,7 +218,7 @@ class ToolExecutor:
             tool_call_id=call_id,
             tool_name=tool_name,
             status=final_status,
-            http_status=result.http_status,
+            http_status=http_status,
             decision=policy.decision,
             reason_code=policy.reason_code.value,
             reason=policy.reason,

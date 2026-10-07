@@ -47,6 +47,7 @@ class AfterCommitResult:
     data: dict[str, Any] = field(default_factory=dict)  # merged over ToolResult.data
     error_code: str | None = None
     error: str | None = None
+    http_status: int | None = None  # overrides ToolResult.http_status when set
 
 
 AfterCommit = Callable[[AsyncSession], Awaitable[AfterCommitResult]]

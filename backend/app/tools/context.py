@@ -19,4 +19,5 @@ class ToolContext:
     request_id: str | None = None
     workflow_run_id: uuid.UUID | None = None
     idempotency_key: str | None = None
+    tool_call_id: uuid.UUID | None = None  # set by the executor once the call is logged
     now: datetime = field(default_factory=lambda: datetime.now(UTC))

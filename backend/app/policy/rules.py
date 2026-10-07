@@ -10,7 +10,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from app.core.config import get_settings
-from app.policy.types import OrderStatus
+from app.policy.types import OrderStatus, RefundStatus
 
 DEFAULT_RULES_PATH = Path(__file__).with_name("rules.yaml")
 
@@ -36,6 +36,8 @@ class RefundRules(_Frozen):
     refundable_statuses: Annotated[frozenset[OrderStatus], Field(min_length=1)]
     velocity_window_days: Annotated[int, Field(gt=0)]
     velocity_max_refunds: Annotated[int, Field(ge=0)]
+    reserving_statuses: Annotated[frozenset[RefundStatus], Field(min_length=1)]
+    velocity_counted_statuses: Annotated[frozenset[RefundStatus], Field(min_length=1)]
     valid_reasons: Annotated[frozenset[str], Field(min_length=1)]
     auto_approve_reasons: frozenset[str]
 

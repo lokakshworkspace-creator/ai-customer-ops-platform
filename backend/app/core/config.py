@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     # Business rules file; empty means the packaged app/policy/rules.yaml.
     policy_rules_path: str | None = None
 
+    # Simulated payment provider (development / tests).
+    payment_sim_latency_ms: int = 0
+    payment_sim_failure_rate: float = 0.0  # probability in [0, 1]
+
+    # `scripts/reconcile_refunds.py` retries refunds stuck in `processing` for longer than this.
+    refund_stuck_after_seconds: int = 300
+
     # HS256 is pinned in app.core.security (not configurable).
     jwt_secret: str = DEV_JWT_SECRET
     jwt_expire_minutes: int = 30

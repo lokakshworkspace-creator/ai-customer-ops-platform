@@ -13,9 +13,13 @@ from app.db.models import User
 from app.db.models.enums import Role
 from app.db.session import get_session
 from app.modules.users import repo as users_repo
+from app.policy.rules import get_rules
+from app.tools.default import build_default_registry
+from app.tools.executor import ToolExecutor
 
 __all__ = [
     "CurrentUser",
+    "get_executor",
     "close_redis",
     "get_current_user",
     "get_redis",
@@ -88,3 +92,13 @@ def require_role(*roles: Role) -> Callable[..., Coroutine[Any, Any, User]]:
         return user
 
     return checker
+
+
+@lru_cache
+def _executor() -> ToolExecutor:
+    return ToolExecutor(build_default_registry(get_rules()))
+
+
+def get_executor() -> ToolExecutor:
+    """The process-wide tool executor (registry + payment provider). Tests override this."""
+    return _executor()

@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db import locking
 from app.modules.orders import service as orders_service
 from app.modules.orders.schemas import OrderOut
 from app.policy import CancelFacts, evaluate_cancel_order, evaluate_read
@@ -60,8 +61,10 @@ class CancelOrderHandler:
     async def decide(
         self, session: AsyncSession, ctx: ToolContext, args: CancelOrderInput, rules: Rules
     ) -> Decision:
-        # Row lock: a concurrent refund or cancel on the same order waits for this transaction.
-        order = await orders_service.get_order(session, ctx.actor, args.order_id, lock=True)
+        # Row lock (see app.db.locking): a concurrent refund or cancel on the same order waits.
+        order = await locking.lock_order(
+            session, args.order_id, owner_id=orders_service.owner_filter(ctx.actor)
+        )
         if order is None:
             raise ToolError("NOT_FOUND", "Order not found", http_status=404)
         policy = evaluate_cancel_order(rules, ctx.actor, CancelFacts(order_status=order.status))
