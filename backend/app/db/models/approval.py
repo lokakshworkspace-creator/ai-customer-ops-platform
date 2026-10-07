@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import ForeignKey, String, Text, text
+from sqlalchemy import ForeignKey, Index, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -13,12 +13,24 @@ class Approval(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """A proposed action parked for a human decision (policy outcome REQUIRE_APPROVAL)."""
 
     __tablename__ = "approvals"
+    __table_args__ = (
+        # At most one open approval per refund.
+        Index(
+            "uq_approvals_refund_id_pending",
+            "refund_id",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+        ),
+    )
 
     workflow_run_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("workflow_runs.id", ondelete="SET NULL"), index=True
     )
     tool_call_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("tool_calls.id", ondelete="SET NULL")
+    )
+    refund_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("refunds.id", ondelete="RESTRICT")
     )
     requested_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     decided_by: Mapped[uuid.UUID | None] = mapped_column(

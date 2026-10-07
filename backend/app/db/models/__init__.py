@@ -5,6 +5,7 @@ from app.db.models.audit_log import AuditLog
 from app.db.models.order import Order, OrderItem
 from app.db.models.outbox import OutboxEvent
 from app.db.models.payment import Payment
+from app.db.models.processed_event import ProcessedEvent
 from app.db.models.refund import Refund
 from app.db.models.ticket import Ticket
 from app.db.models.tool_call import ToolCall
@@ -18,6 +19,7 @@ __all__ = [
     "OrderItem",
     "OutboxEvent",
     "Payment",
+    "ProcessedEvent",
     "Refund",
     "Ticket",
     "ToolCall",

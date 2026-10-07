@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
 from app.db.models import Order, OrderItem, Payment, Refund, User
-from app.db.models.enums import OrderStatus, PaymentStatus, Role
+from app.db.models.enums import OrderStatus, PaymentStatus, RefundStatus, Role
 
 
 async def create_user(
@@ -74,14 +74,20 @@ async def create_refund(
     *,
     idempotency_key: str,
     amount: str = "10.00",
+    request_hash: str | None = None,
+    reason_code: str = "damaged",
+    status: RefundStatus = RefundStatus.processing,
 ) -> Refund:
     refund = Refund(
         idempotency_key=idempotency_key,
+        request_hash=request_hash or idempotency_key.ljust(64, "0")[:64],
         payment_id=payment.id,
         order_id=payment.order_id,
         requested_by=requested_by.id,
         amount=Decimal(amount),
         currency=payment.currency,
+        reason_code=reason_code,
+        status=status,
     )
     session.add(refund)
     await session.flush()

@@ -26,11 +26,11 @@ class PaymentStatus(StrEnum):
 
 
 class RefundStatus(StrEnum):
-    pending = "pending"
-    pending_approval = "pending_approval"
+    pending_approval = "pending_approval"  # policy said REQUIRE_APPROVAL; waiting for an admin
+    processing = "processing"  # approved; payout in flight (or interrupted: see reconcile script)
     succeeded = "succeeded"
-    failed = "failed"
-    rejected = "rejected"
+    failed = "failed"  # terminal for this idempotency key
+    rejected = "rejected"  # an admin declined it
 
 
 class TicketStatus(StrEnum):
@@ -62,6 +62,7 @@ class ApprovalStatus(StrEnum):
 
 class ToolCallStatus(StrEnum):
     pending = "pending"
+    invalid = "invalid"  # unknown tool or arguments failed schema validation
     succeeded = "succeeded"
     failed = "failed"
     denied = "denied"

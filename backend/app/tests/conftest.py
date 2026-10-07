@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 
 from app.api.deps import get_session
 from app.core.config import get_settings
+from app.db.base import Base
 from app.main import app
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -46,6 +47,34 @@ async def _ensure_database(url: URL) -> None:
         await admin.dispose()
 
 
+async def rebuild_schema(engine: AsyncEngine) -> None:
+    """Drop and recreate the schema of the TEST database, then migrate to head. Used at session
+    start, and by tests that move the schema between revisions and must always leave it clean."""
+    url = _test_db_url()
+    async with engine.begin() as conn:
+        dbname = await conn.scalar(text("SELECT current_database()"))
+        assert dbname and dbname.endswith("_test"), f"refusing to rebuild {dbname!r}"
+        await conn.execute(text("DROP SCHEMA public CASCADE"))
+        await conn.execute(text("CREATE SCHEMA public"))
+    # Alembic's env.py calls asyncio.run(), so it must not run on the pytest event loop.
+    await asyncio.to_thread(command.upgrade, _alembic_config(url), "head")
+    await engine.dispose()  # pooled connections hold plans for the old schema
+
+
+async def truncate_all(engine: AsyncEngine) -> None:
+    """Empty every application table in the TEST database (for tests that really commit).
+
+    Guards: refuses unless the connected database name ends in `_test`; only tables known to
+    the models are touched, so `alembic_version` is never truncated.
+    """
+    async with engine.begin() as conn:
+        dbname = await conn.scalar(text("SELECT current_database()"))
+        assert dbname and dbname.endswith("_test"), f"refusing to truncate {dbname!r}"
+        names = ", ".join(f'"{t.name}"' for t in Base.metadata.sorted_tables)
+        assert "alembic_version" not in names
+        await conn.execute(text(f"TRUNCATE TABLE {names} RESTART IDENTITY CASCADE"))
+
+
 @pytest.fixture(scope="session")
 async def engine() -> AsyncIterator[AsyncEngine]:
     """A fresh `ops_test` database whose schema is built by running the real Alembic
@@ -54,12 +83,7 @@ async def engine() -> AsyncIterator[AsyncEngine]:
     await _ensure_database(url)
 
     eng = create_async_engine(url)
-    async with eng.begin() as conn:
-        await conn.execute(text("DROP SCHEMA public CASCADE"))
-        await conn.execute(text("CREATE SCHEMA public"))
-
-    # Alembic's env.py calls asyncio.run(), so it must not run on the pytest event loop.
-    await asyncio.to_thread(command.upgrade, _alembic_config(url), "head")
+    await rebuild_schema(eng)
     yield eng
     await eng.dispose()
 

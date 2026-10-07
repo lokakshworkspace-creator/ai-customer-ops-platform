@@ -13,6 +13,8 @@ dependencies = [
     "alembic>=1.13",
     "pyjwt>=2.8",
     "argon2-cffi>=23.1",
+    "aiokafka>=0.12",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

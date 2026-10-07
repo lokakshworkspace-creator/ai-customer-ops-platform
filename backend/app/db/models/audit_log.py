@@ -27,6 +27,7 @@ class AuditLog(UUIDPrimaryKeyMixin, Base):
     decision: Mapped[PolicyDecision | None] = mapped_column(
         str_enum(PolicyDecision, "audit_decision")
     )
+    reason_code: Mapped[str | None] = mapped_column(String(64))
     reason: Mapped[str | None] = mapped_column(Text)
     details: Mapped[dict[str, Any]] = mapped_column(
         server_default=text("'{}'::jsonb"), default=dict
