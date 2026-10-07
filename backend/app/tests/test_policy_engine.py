@@ -275,7 +275,7 @@ def test_admin_cannot_approve_their_own_request() -> None:
         make_rules(),
         APPROVE_REFUND,
         admin,
-        requested_by=admin.user_id,
+        requested_by=admin.id,
         refund_facts=make_facts(),
         now=NOW,
     )
@@ -284,7 +284,7 @@ def test_admin_cannot_approve_their_own_request() -> None:
 
 def test_separation_of_duties_is_per_action_and_config_driven() -> None:
     admin = actor(Role.admin)
-    own = {"requested_by": admin.user_id, "refund_facts": make_facts(), "now": NOW}
+    own = {"requested_by": admin.id, "refund_facts": make_facts(), "now": NOW}
     # rejecting your own request is allowed by default (it is just withdrawing it)...
     assert evaluate_refund_decision(make_rules(), REJECT_REFUND, admin, **own).decision == ALLOW
     # ...but the list lives in rules.yaml, not in code

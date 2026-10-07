@@ -50,4 +50,4 @@ def make_facts(**overrides: Any) -> RefundFacts:
 
 
 def actor(role: Role = Role.customer, user_id: uuid.UUID | None = None) -> Actor:
-    return Actor(user_id=user_id or uuid.uuid4(), role=role)
+    return Actor(id=user_id or uuid.uuid4(), role=role)

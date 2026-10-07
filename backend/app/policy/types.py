@@ -57,7 +57,7 @@ class ReasonCode(StrEnum):
 class Actor:
     """The authenticated caller. Always comes from the session, never from tool arguments."""
 
-    user_id: uuid.UUID
+    id: uuid.UUID
     role: Role
 
 

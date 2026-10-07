@@ -197,7 +197,7 @@ def evaluate_action_gate(
     if (
         action in rules.separation_of_duties_actions
         and requested_by is not None
-        and requested_by == actor.user_id
+        and requested_by == actor.id
     ):
         return PolicyResult(
             PolicyDecision.DENY,
