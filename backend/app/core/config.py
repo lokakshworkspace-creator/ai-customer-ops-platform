@@ -22,9 +22,9 @@ class Settings(BaseSettings):
     app_env: str = "dev"  # dev | test | prod
     log_level: str = "INFO"
 
-    database_url: str = "postgresql+asyncpg://ops:ops@localhost:5432/ops"
-    redis_url: str = "redis://localhost:6379/0"
-    kafka_bootstrap_servers: str = "localhost:9092"
+    database_url: str = "postgresql+asyncpg://ops:ops@127.0.0.1:5432/ops"
+    redis_url: str = "redis://127.0.0.1:6379/0"
+    kafka_bootstrap_servers: str = "127.0.0.1:9092"
 
     # HS256 is pinned in app.core.security (not configurable).
     jwt_secret: str = DEV_JWT_SECRET
