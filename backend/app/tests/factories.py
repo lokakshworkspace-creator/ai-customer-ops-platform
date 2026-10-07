@@ -1,6 +1,7 @@
 """Small async helpers for creating rows in tests."""
 
 import uuid
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,8 +39,11 @@ async def create_order(
     total: str = "49.98",
     status: OrderStatus = OrderStatus.paid,
     items: list[tuple[str, int, str]] | None = None,
+    placed_at: datetime | None = None,
 ) -> Order:
     order = Order(user_id=user.id, status=status, total_amount=Decimal(total), currency="INR")
+    if placed_at is not None:
+        order.placed_at = placed_at
     for sku, qty, price in items or [("SKU-1", 2, "24.99")]:
         order.items.append(
             OrderItem(sku=sku, name=f"Item {sku}", quantity=qty, unit_price=Decimal(price))
