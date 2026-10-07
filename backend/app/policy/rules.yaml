@@ -1,0 +1,42 @@
+# Business rules. The policy engine reads ONLY this file: no thresholds live in code.
+# Golden rule 3: this file always beats any retrieved document.
+#
+# Amounts are quoted strings (never floats). Statuses must be real order statuses; the loader
+# rejects unknown keys, unknown statuses, and floats, and the app refuses to start on a bad file.
+version: 1
+
+refund:
+  currency: INR                 # thresholds below are in this currency
+  auto_approve_max: "500.00"    # <= this (and a valid reason) is auto-approved; above needs a human
+  max_order_age_days: 30        # orders older than this (strictly) cannot be refunded
+  refundable_statuses: [paid, delivered]
+  velocity_window_days: 30
+  velocity_max_refunds: 3       # a request that would make the customer's count in the window exceed this needs approval
+  valid_reasons:
+    - damaged
+    - defective
+    - wrong_item
+    - not_as_described
+    - not_delivered
+    - late_delivery
+    - changed_mind
+    - order_cancelled
+    - other
+  auto_approve_reasons:         # must be a subset of valid_reasons; the rest need a human
+    - damaged
+    - defective
+    - wrong_item
+    - not_as_described
+    - not_delivered
+    - late_delivery
+
+cancel:
+  cancellable_statuses: [pending]      # unpaid orders can simply be cancelled
+  refund_required_statuses: [paid]     # paid orders must go through a refund instead
+
+admin_only_actions:                    # customers attempting these are denied
+  - approve_refund
+  - reject_refund
+
+separation_of_duties_actions:          # the decider must differ from the requester
+  - approve_refund

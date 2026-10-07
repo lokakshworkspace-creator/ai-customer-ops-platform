@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     redis_url: str = "redis://127.0.0.1:6379/0"
     kafka_bootstrap_servers: str = "127.0.0.1:9092"
 
+    # Business rules file; empty means the packaged app/policy/rules.yaml.
+    policy_rules_path: str | None = None
+
     # HS256 is pinned in app.core.security (not configurable).
     jwt_secret: str = DEV_JWT_SECRET
     jwt_expire_minutes: int = 30
