@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from alembic import command
@@ -24,6 +25,9 @@ from app.modules.refunds.payments import SimulatedPaymentProvider
 from app.policy.rules import get_rules
 from app.tools.default import build_default_registry
 from app.tools.executor import ToolExecutor
+
+if TYPE_CHECKING:
+    from app.tests.event_helpers import KafkaEnv
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 TEST_DB_NAME = "ops_test"
@@ -198,3 +202,20 @@ async def committed_client(
         yield c
     app.dependency_overrides.pop(get_session, None)
     app.dependency_overrides.pop(get_executor, None)
+
+
+@pytest.fixture
+async def kafka_env() -> AsyncIterator["KafkaEnv"]:
+    """A unique topic prefix (own topics, own consumer group) on the REAL Redpanda."""
+    from app.tests.event_helpers import create_env, delete_env
+
+    try:
+        env = await create_env()
+    except Exception as exc:  # fail loudly: these tests need the compose Redpanda running
+        pytest.fail(
+            f"Redpanda is not reachable ({type(exc).__name__}: {exc}); run `docker compose up -d`"
+        )
+    try:
+        yield env
+    finally:
+        await delete_env(env)

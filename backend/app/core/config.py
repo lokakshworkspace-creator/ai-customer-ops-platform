@@ -33,6 +33,22 @@ class Settings(BaseSettings):
     payment_sim_latency_ms: int = 0
     payment_sim_failure_rate: float = 0.0  # probability in [0, 1]
 
+    # Event pipeline (outbox relay and consumers).
+    kafka_topic_prefix: str = "ops"
+    kafka_request_timeout_ms: int = 10000
+    kafka_startup_timeout_s: float = 10.0
+    outbox_poll_interval_s: float = 1.0
+    outbox_batch_size: int = 50
+    # After this many failed publish attempts an event is PARKED (retries stop, and later events
+    # of the same aggregate are blocked until someone un-parks it: scripts/outbox_admin.py).
+    outbox_max_attempts: int = 10
+    outbox_backoff_base_s: float = 1.0  # delay after the 1st failure; doubles each time
+    outbox_backoff_max_s: float = 300.0
+    consumer_group: str = "notifications"
+    consumer_poll_timeout_ms: int = 1000
+    consumer_max_handler_attempts: int = 5
+    consumer_handler_backoff_s: float = 0.5
+
     # `scripts/reconcile_refunds.py` retries refunds stuck in `processing` for longer than this.
     refund_stuck_after_seconds: int = 300
 

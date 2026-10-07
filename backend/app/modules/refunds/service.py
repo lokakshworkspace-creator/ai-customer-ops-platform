@@ -216,7 +216,7 @@ async def payout_flow(
             customer_id,
             EventType.REFUND_FAILED,
             request_id=request_id,
-            error=result.error,
+            failure_code="PAYOUT_DECLINED",  # a code, never the provider's free text
         )
         audit.record(
             session,

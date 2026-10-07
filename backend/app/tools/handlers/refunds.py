@@ -407,8 +407,7 @@ class RejectRefundHandler(_DecisionHandler):
             st.customer_id,
             EventType.REFUND_REJECTED,
             request_id=ctx.request_id,
-            rejected_by=ctx.actor.id,
-            note=args.note,
+            rejected_by=ctx.actor.id,  # the admin's free-text note stays in the approvals row
         )
         audit.record(
             session,

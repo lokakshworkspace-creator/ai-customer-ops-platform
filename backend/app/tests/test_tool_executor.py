@@ -637,7 +637,7 @@ async def test_ticket_created_event_is_written_with_the_ticket(db_session, alice
         str(ticket.id),
     )
     assert event.published_at is None and event.attempts == 0
-    assert event.payload["data"]["subject"] == "Hi" and event.payload["data"]["user_id"] == str(
-        alice.id
-    )
+    assert event.payload["data"]["user_id"] == str(alice.id)
+    assert event.payload["data"]["priority"] == "normal"
+    assert "subject" not in event.payload["data"]  # ids and state only: no free text
     assert event.payload["meta"]["request_id"] == "req-abcdef12"

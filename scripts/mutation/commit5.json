@@ -1,0 +1,98 @@
+[
+  {
+    "id": "E1",
+    "desc": "REQUESTED: mark rows published BEFORE producing",
+    "file": "app/events/relay.py",
+    "old": "                results = await asyncio.gather(*[self._publish_one(row) for row in rows])\n",
+    "new": "                for row in rows:\n                    await session.execute(MARK_PUBLISHED, {\"id\": row[\"id\"]})\n                results = await asyncio.gather(*[self._publish_one(row) for row in rows])\n",
+    "tests": "app/tests/test_outbox_relay.py"
+  },
+  {
+    "id": "E2",
+    "desc": "REQUESTED: ignore SKIP LOCKED (two relays collide)",
+    "file": "app/events/relay.py",
+    "old": "    FOR UPDATE OF e SKIP LOCKED\n",
+    "new": "    FOR UPDATE OF e\n",
+    "tests": "app/tests/test_outbox_relay.py"
+  },
+  {
+    "id": "E3",
+    "desc": "REQUESTED: skip the per-aggregate ordering check",
+    "file": "app/events/relay.py",
+    "old": "      AND NOT EXISTS (\n            SELECT 1 FROM outbox_events earlier\n            WHERE earlier.aggregate_id = e.aggregate_id\n              AND earlier.published_at IS NULL\n              AND earlier.seq < e.seq)\n",
+    "new": "",
+    "tests": "app/tests/test_outbox_relay.py"
+  },
+  {
+    "id": "E4",
+    "desc": "REQUESTED: consumer commits the offset BEFORE the effect",
+    "file": "app/events/consumers/base.py",
+    "old": "        outcome = await self._apply_effect(envelope, msg)\n",
+    "new": "        await self._commit_offset(msg)\n        outcome = await self._apply_effect(envelope, msg)\n",
+    "tests": "app/tests/test_event_consumer.py"
+  },
+  {
+    "id": "E5",
+    "desc": "REQUESTED: consumer skips the processed_events check",
+    "file": "app/events/consumers/base.py",
+    "old": "                    if claimed is None:  # already processed: a duplicate delivery\n",
+    "new": "                    if False:\n",
+    "tests": "app/tests/test_event_consumer.py"
+  },
+  {
+    "id": "E6",
+    "desc": "REQUESTED: drop the backoff (hot retry loop)",
+    "file": "app/events/relay.py",
+    "old": "    return min(cap, base * (2**attempts_so_far))\n",
+    "new": "    return 0.0\n",
+    "tests": "app/tests/test_outbox_relay.py"
+  },
+  {
+    "id": "E7",
+    "desc": "REQUESTED: publish from the request handler instead of the outbox",
+    "file": "app/tools/handlers/refunds.py",
+    "old": "        refund_service.emit(\n            session, refund, st.customer_id, EventType.REFUND_REQUESTED, request_id=ctx.request_id\n        )\n",
+    "new": "        from app.events.kafka import KafkaEventProducer\n\n        direct = KafkaEventProducer(\"127.0.0.1:9092\", startup_timeout_s=2)\n        await direct.start()\n        await direct.publish(\"ops.refunds\", str(refund.id).encode(), b\"{}\")\n",
+    "tests": "app/tests/test_no_direct_publish.py"
+  },
+  {
+    "id": "E8",
+    "desc": "extra: producer waits for the leader only (acks=1, not idempotent)",
+    "file": "app/events/kafka.py",
+    "old": "        \"acks\": \"all\",\n",
+    "new": "        \"acks\": 1,\n",
+    "tests": "app/tests/test_outbox_relay.py"
+  },
+  {
+    "id": "E9",
+    "desc": "extra: events are never parked (retried forever)",
+    "file": "app/events/relay.py",
+    "old": "        parked_at = CASE WHEN attempts + 1 >= :max_attempts THEN now() ELSE parked_at END\n",
+    "new": "        parked_at = parked_at\n",
+    "tests": "app/tests/test_outbox_relay.py"
+  },
+  {
+    "id": "E10",
+    "desc": "extra: a poison message is not skipped (offset not committed)",
+    "file": "app/events/consumers/base.py",
+    "old": "            await self._dead_letter(msg, poison.reason, poison.detail)\n            await self._commit_offset(msg)\n",
+    "new": "            await self._dead_letter(msg, poison.reason, poison.detail)\n",
+    "tests": "app/tests/test_event_consumer.py"
+  },
+  {
+    "id": "E11",
+    "desc": "extra: add_event accepts any field (personal data can reach events)",
+    "file": "app/events/outbox.py",
+    "old": "    if extra:\n",
+    "new": "    if False:\n",
+    "tests": "app/tests/test_event_schema.py"
+  },
+  {
+    "id": "E12",
+    "desc": "extra: un-park does not reset the attempt counter",
+    "file": "app/events/admin.py",
+    "old": "\"UPDATE outbox_events SET parked_at = NULL, attempts = 0, next_attempt_at = now() \"",
+    "new": "\"UPDATE outbox_events SET parked_at = NULL, next_attempt_at = now() \"",
+    "tests": "app/tests/test_outbox_admin.py"
+  }
+]

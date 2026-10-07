@@ -33,7 +33,6 @@ async def create_ticket(
             "ticket_id": ticket.id,
             "user_id": user_id,
             "order_id": order_id,
-            "subject": subject,
             "priority": priority.value,
         },
         request_id=request_id,

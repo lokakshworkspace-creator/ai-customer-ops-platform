@@ -20,7 +20,7 @@ From the repo root, with the backend dependencies installed (see the main README
 python scripts/mutation/run.py --list                  # lists and mutation ids
 python scripts/mutation/run.py commit4                 # the whole commit-4 list
 python scripts/mutation/run.py commit4 --only R1,R2    # selected mutations
-python scripts/mutation/run.py commit4 --timeout 400   # raise the per-mutant timeout
+python scripts/mutation/run.py commit5 --timeout 400   # Kafka-backed suites are slower
 ```
 
 The runner is standard-library only. It finds `backend/` relative to itself and uses
@@ -47,6 +47,7 @@ failure, and the first failing test is printed so you can see it failed for the 
 |---|---|
 | `commit3.json` | Tool executor pipeline: policy gate, authorization, logging of denied calls, argument size caps, rollback on failure, agent visibility of admin tools, owner scoping |
 | `commit4.json` | Refunds: unique constraint, order and customer locks, `request_hash`, policy gate, provider idempotency key, outbox atomicity, provider call outside a transaction, canonical hashing, velocity statuses, reconcile re-check, self-approval |
+| `commit5.json` | Outbox relay and consumer: marking published only after the broker acknowledges, `SKIP LOCKED`, per-aggregate ordering, backoff and parking, producer durability settings, offset-commit order, consumer de-duplication, poison-message handling, no publishing from request handlers, the event field allow-list |
 
 `tests/test_mutation_lists.py` runs in the normal suite and checks that every pattern in every list
 still occurs **exactly once** in its file, so the lists cannot silently rot when code is refactored.
