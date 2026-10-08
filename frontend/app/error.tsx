@@ -20,6 +20,14 @@ export default function ErrorBoundary({
           {error.message}
         </p>
       )}
+      {/* the stack names the file and line of the failure: paste it when reporting a crash */}
+      <details className="rounded border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+        <summary className="cursor-pointer select-none">Technical details (stack)</summary>
+        <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono">
+          {error.stack ?? "(no stack available)"}
+          {error.digest ? `\n\ndigest: ${error.digest}` : ""}
+        </pre>
+      </details>
       <button className="rounded bg-slate-900 px-3 py-2 font-medium text-white" onClick={reset}>
         Try again
       </button>
