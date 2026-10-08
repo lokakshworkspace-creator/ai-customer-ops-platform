@@ -89,3 +89,38 @@ def test_an_unregistered_marker_is_an_error() -> None:
     finally:
         probe.unlink()
     assert out.returncode != 0 and "not_a_registered_marker" in (out.stdout + out.stderr)
+
+
+def test_a_default_per_test_timeout_is_configured(pytestconfig) -> None:
+    """pytest-timeout guards the suite against a test that hangs (see the README)."""
+    cfg = tomllib.loads((BACKEND / "pyproject.toml").read_text(encoding="utf-8"))
+    assert cfg["tool"]["pytest"]["ini_options"]["timeout"] == 180
+    assert any("pytest-timeout" in dep for dep in cfg["project"]["optional-dependencies"]["dev"])
+    assert float(pytestconfig.getini("timeout")) == 180  # and pytest really reads it
+
+
+def test_a_hanging_test_is_stopped_by_the_timeout_instead_of_hanging(tmp_path) -> None:
+    (tmp_path / "test_hang.py").write_text(
+        "import time\n\ndef test_hangs():\n    time.sleep(120)\n", encoding="utf-8"
+    )
+    done = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-o",
+            "timeout=3",
+            "-q",
+            "--rootdir",
+            str(tmp_path),
+            str(tmp_path / "test_hang.py"),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=100,  # far below the 120 s the test would sleep; cold start is ~11 s
+    )
+    assert done.returncode != 0
+    assert "Timeout" in done.stdout + done.stderr

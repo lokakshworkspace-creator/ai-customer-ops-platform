@@ -21,6 +21,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "pytest-timeout>=2.3",
     "httpx>=0.27",
     "ruff>=0.6",
 ]
@@ -45,6 +46,8 @@ asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 testpaths = ["app/tests"]
 addopts = "--strict-markers"
+# A hung test fails (or, on Windows, aborts the run with a stack dump) instead of hanging forever.
+timeout = 180
 markers = [
     "kafka: needs the Redpanda from docker-compose (added automatically to every test that uses the kafka_env fixture); deselect with -m \"not kafka\"",
 ]
