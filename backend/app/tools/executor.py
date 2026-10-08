@@ -92,6 +92,18 @@ class ToolExecutor:
             user_id=str(ctx.actor.id),
         )
 
+        # -- 0. agent gate -------------------------------------------------------------
+        # Defence in depth behind "the model is never shown admin tools": a proposal for a tool
+        # that is not agent_visible is refused for ANY actor, before its arguments are even read.
+        if spec is not None and ctx.origin == "agent" and not spec.agent_visible:
+            gate = PolicyResult(
+                PolicyDecision.DENY,
+                ReasonCode.TOOL_NOT_AVAILABLE,
+                "That action is not available to the assistant.",
+                (ReasonCode.TOOL_NOT_AVAILABLE,),
+            )
+            return await self._conclude_denied(session, ctx, call_id, spec, gate, blog)
+
         # -- 1. validate ------------------------------------------------------------------
         if spec is None:
             return await self._conclude_without_policy(

@@ -19,23 +19,25 @@ class ToolInput(BaseModel):
 
 
 class GetOrderInput(ToolInput):
-    order_id: uuid.UUID
+    order_id: uuid.UUID = Field(
+        description="The id (UUID) of the order, as returned by list_orders."
+    )
 
 
 class ListOrdersInput(ToolInput):
-    limit: Annotated[int, Field(ge=1, le=100)] = 20
-    offset: Annotated[int, Field(ge=0)] = 0
+    limit: Annotated[int, Field(ge=1, le=100, description="How many orders to return.")] = 20
+    offset: Annotated[int, Field(ge=0, description="How many orders to skip.")] = 0
 
 
 class CreateTicketInput(ToolInput):
-    subject: Text200
-    body: Text5000
-    order_id: uuid.UUID | None = None
-    priority: TicketPriority = TicketPriority.normal
+    subject: Text200 = Field(description="A short summary of the problem.")
+    body: Text5000 = Field(description="What happened, in the customer's own words.")
+    order_id: uuid.UUID | None = Field(None, description="The order this is about, if any.")
+    priority: TicketPriority = Field(TicketPriority.normal, description="low, normal or high.")
 
 
 class CancelOrderInput(ToolInput):
-    order_id: uuid.UUID
+    order_id: uuid.UUID = Field(description="The id (UUID) of the unpaid order to cancel.")
 
 
 def _reject_float_money(value: Any) -> Any:
@@ -60,10 +62,10 @@ class RequestRefundInput(ToolInput):
     """The refund request. There is deliberately no user, key or role field: identity comes from
     the session and the Idempotency-Key from the request header."""
 
-    order_id: uuid.UUID
-    amount: Amount
-    reason_code: ReasonCodeStr
-    note: Note500 | None = None
+    order_id: uuid.UUID = Field(description="The id (UUID) of the order to refund.")
+    amount: Amount = Field(description="Amount to refund, in the order's currency.")
+    reason_code: ReasonCodeStr = Field(description="Why the customer wants a refund.")
+    note: Note500 | None = Field(None, description="Optional note, at most 500 characters.")
 
 
 class DecisionInput(ToolInput):

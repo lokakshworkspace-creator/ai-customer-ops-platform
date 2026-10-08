@@ -1,0 +1,18 @@
+[
+  {
+    "id": "A1",
+    "desc": "the executor's agent gate is off (an admin's chat can run approve_refund)",
+    "file": "app/tools/executor.py",
+    "old": "if spec is not None and ctx.origin == \"agent\" and not spec.agent_visible:",
+    "new": "if spec is not None and False and not spec.agent_visible:",
+    "tests": "app/tests/test_tool_executor.py"
+  },
+  {
+    "id": "A2",
+    "desc": "the model is shown every tool, admin tools included",
+    "file": "app/agent/tools_view.py",
+    "old": "for t in registry.agent_tools()",
+    "new": "for t in registry.all()",
+    "tests": "app/tests/test_agent_tools_view.py"
+  }
+]

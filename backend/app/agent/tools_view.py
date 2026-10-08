@@ -1,0 +1,93 @@
+"""The tools as the LLM sees them: ONLY `agent_visible` tools, with model-friendly JSON schemas.
+
+Why the raw Pydantic schema is not handed over as it is:
+
+* money fields are `anyOf [number, string]` plus non-standard keys (`decimal_places`, `gt`, `le`).
+  A model told "a number is fine" sends `250.0`, which our validator (correctly) rejects, so money
+  is presented as a decimal STRING only;
+* `Optional[X]` becomes `anyOf [X, null]`, `$defs`/`$ref` and `title` clutter everything;
+* `reason_code` is a free string in the schema, but the valid reasons are configuration
+  (`rules.yaml`), so the model is given them as an enum. It is NOT told which reasons or amounts
+  are auto-approved: policy decides that, not the prompt.
+
+The view is derived from the registry, so adding a tool or changing a schema changes what the model
+sees. Identity (`user_id`, `role`) and idempotency keys are not fields of any tool: the executor
+rejects them (`extra="forbid"`) and the backend derives the key itself.
+"""
+
+from typing import Any
+
+from pydantic import BaseModel
+
+from app.agent.llm.base import ToolDef
+from app.policy.rules import Rules
+from app.tools.registry import ToolRegistry
+
+_NON_STANDARD = {"title", "decimal_places", "max_digits", "gt", "ge", "lt", "le"}
+MONEY_FIELDS = frozenset({"amount"})
+MONEY_PATTERN = r"^[0-9]{1,10}(\.[0-9]{1,2})?$"
+MONEY_HINT = ' A decimal string such as "250.00", never a JSON number.'
+
+
+def _resolve(node: Any, defs: dict[str, Any]) -> Any:
+    """Inline `$ref`s (keeping sibling keys such as description/default)."""
+    if isinstance(node, list):
+        return [_resolve(x, defs) for x in node]
+    if not isinstance(node, dict):
+        return node
+    out = {k: _resolve(v, defs) for k, v in node.items() if k != "$ref"}
+    if "$ref" in node:
+        target = _resolve(defs[node["$ref"].rsplit("/", 1)[-1]], defs)
+        out = {**target, **out}
+    return out
+
+
+def _clean(node: Any) -> Any:
+    if isinstance(node, list):
+        return [_clean(x) for x in node]
+    if not isinstance(node, dict):
+        return node
+    out: dict[str, Any] = {}
+    for key, value in node.items():
+        if key == "properties":  # keys here are FIELD names: never drop one called "title"
+            out[key] = {name: _clean(sub) for name, sub in value.items()}
+        elif key not in _NON_STANDARD:
+            out[key] = _clean(value)
+    if out.get("default", 0) is None:
+        out.pop("default")
+    if "anyOf" in out:
+        options = out.pop("anyOf")
+        options = [o for o in options if o.get("type") != "null"]
+        if any(o.get("type") == "number" for o in options):
+            options = [o for o in options if o.get("type") != "number"]  # money: string only
+        out = {**out, **options[0]} if len(options) == 1 else {**out, "anyOf": options}
+    return out
+
+
+def to_llm_schema(model: type[BaseModel], rules: Rules) -> dict[str, Any]:
+    raw = model.model_json_schema()
+    schema = _clean(_resolve({k: v for k, v in raw.items() if k != "$defs"}, raw.get("$defs", {})))
+    schema.pop("description", None)  # the class docstring; the tool's own description is used
+    props: dict[str, Any] = schema.get("properties", {})
+    for name in MONEY_FIELDS & props.keys():
+        note = props[name].get("description", "")
+        props[name] = {
+            "type": "string",
+            "pattern": MONEY_PATTERN,
+            "description": (note + MONEY_HINT).strip(),
+        }
+    if "reason_code" in props:
+        props["reason_code"] = {
+            "type": "string",
+            "enum": sorted(rules.refund.valid_reasons),
+            "description": props["reason_code"].get("description", ""),
+        }
+    return schema
+
+
+def agent_tool_defs(registry: ToolRegistry, rules: Rules) -> list[ToolDef]:
+    """What the model may be shown and may propose. Everything else does not exist for it."""
+    return [
+        ToolDef(t.name, t.description, to_llm_schema(t.input_model, rules))
+        for t in registry.agent_tools()
+    ]

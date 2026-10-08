@@ -641,3 +641,62 @@ async def test_ticket_created_event_is_written_with_the_ticket(db_session, alice
     assert event.payload["data"]["priority"] == "normal"
     assert "subject" not in event.payload["data"]  # ids and state only: no free text
     assert event.payload["meta"]["request_id"] == "req-abcdef12"
+
+
+# --- the agent gate: the LLM may only use agent_visible tools, whoever it is chatting as ---------
+
+
+async def test_an_agent_proposal_for_a_tool_that_is_not_agent_visible_is_denied_and_logged(
+    db_session, admin
+) -> None:
+    handler = FakeHandler()
+    ex = make_executor(admin_ping=(handler, ADMIN))
+    # An ADMIN is chatting, so the role check alone would let this through.
+    out = await ex.run(db_session, ctx_for(admin, origin="agent"), "admin_ping", {"note": "x"})
+
+    assert (out.status, out.http_status) == (ToolCallStatus.denied, 403)
+    assert (out.decision, out.reason_code) == (PolicyDecision.DENY, "TOOL_NOT_AVAILABLE")
+    assert handler.decided == 0 and handler.executed == 0
+    call = await row(db_session, out.tool_call_id)
+    assert call.status == ToolCallStatus.denied and call.policy_reason_code == "TOOL_NOT_AVAILABLE"
+    (a,) = await audit(db_session, out.tool_call_id)
+    assert (a.decision, a.reason_code) == (PolicyDecision.DENY, "TOOL_NOT_AVAILABLE")
+
+
+async def test_the_same_tool_from_the_api_is_unaffected_by_the_agent_gate(
+    db_session, admin
+) -> None:
+    handler = FakeHandler()
+    out = await make_executor(admin_ping=(handler, ADMIN)).run(
+        db_session, ctx_for(admin), "admin_ping", {}
+    )
+    assert out.status == ToolCallStatus.succeeded and handler.executed == 1
+
+
+async def test_the_gate_comes_before_argument_validation(db_session, admin) -> None:
+    handler = FakeHandler()
+    ex = make_executor(admin_ping=(handler, ADMIN))
+    out = await ex.run(db_session, ctx_for(admin, origin="agent"), "admin_ping", {"bogus": 1})
+    assert out.status == ToolCallStatus.denied and out.reason_code == "TOOL_NOT_AVAILABLE"
+
+
+async def test_an_admin_chatting_cannot_have_the_assistant_approve_a_refund(
+    db_session, admin
+) -> None:
+    ex = ToolExecutor(build_default_registry(RULES), rules_provider=lambda: RULES)
+    args = {"approval_id": str(uuid.uuid4())}
+    out = await ex.run(db_session, ctx_for(admin, origin="agent"), "approve_refund", args)
+    assert (out.status, out.reason_code) == (ToolCallStatus.denied, "TOOL_NOT_AVAILABLE")
+    # the same call from the API reaches the handler (and fails there: no such approval)
+    api = await ex.run(db_session, ctx_for(admin), "approve_refund", args)
+    assert api.reason_code != "TOOL_NOT_AVAILABLE"
+
+
+async def test_agent_visible_tools_work_for_the_agent_and_unknown_tools_stay_unknown(
+    db_session, alice
+) -> None:
+    ex = ToolExecutor(build_default_registry(RULES), rules_provider=lambda: RULES)
+    ok = await ex.run(db_session, ctx_for(alice, origin="agent"), "list_orders", {})
+    assert ok.status == ToolCallStatus.succeeded
+    unknown = await ex.run(db_session, ctx_for(alice, origin="agent"), "no_such_tool", {})
+    assert (unknown.status, unknown.error_code) == (ToolCallStatus.invalid, "UNKNOWN_TOOL")
