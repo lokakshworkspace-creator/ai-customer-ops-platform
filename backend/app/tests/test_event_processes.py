@@ -111,7 +111,8 @@ async def test_a_running_relay_process_shuts_down_cleanly_on_sigterm(
         await asyncio.sleep(4)
         assert proc.returncode is None, "the relay should still be running"
         proc.send_signal(signal.SIGTERM)
-        raw, _ = await asyncio.wait_for(proc.communicate(), 30)
+        # generous: a cold start costs ~11 s of imports (see the README), then shutdown
+        raw, _ = await asyncio.wait_for(proc.communicate(), 60)
     finally:
         if proc.returncode is None:
             proc.kill()

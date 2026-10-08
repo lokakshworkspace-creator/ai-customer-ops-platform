@@ -203,7 +203,12 @@ def _run(module: str, port: int, deadline: int) -> subprocess.CompletedProcess:
         env=env,
         capture_output=True,
         text=True,
-        timeout=25,
+        # The SUBPROCESS timeout is generous on purpose: a cold start (the first Python launch
+        # after idle) costs ~11 s of imports alone, which must never look like a hang. The
+        # app-level --deadline stays short (3 s), so a genuine hang still fails quickly: the
+        # process exits 3 on its own, and the elapsed-time assertion below catches a deadline
+        # that does not fire.
+        timeout=60,
     )
 
 

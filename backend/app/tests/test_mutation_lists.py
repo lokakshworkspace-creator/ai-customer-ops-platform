@@ -58,7 +58,7 @@ def test_the_runner_lists_without_running_anything() -> None:
         [sys.executable, str(MUTATION_DIR / "run.py"), "--list"],
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=60,  # a cold Python start alone can take ~11 s
     )
     assert out.returncode == 0
     assert "commit4:" in out.stdout and "R1" in out.stdout
