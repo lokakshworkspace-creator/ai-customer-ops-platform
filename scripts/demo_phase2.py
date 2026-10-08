@@ -40,7 +40,7 @@ from typing import Any
 import httpx
 from sqlalchemy import text
 
-from app.core.config import get_settings
+from app.core.config import dev_only_refusal, get_settings
 from app.core.security import hash_password
 from app.db.models import Order, OrderItem, Payment, User
 from app.db.models.enums import OrderStatus, PaymentStatus, Role
@@ -343,6 +343,10 @@ async def preflight(port: int) -> None:
 
 
 async def main(port: int) -> int:
+    refusal = dev_only_refusal("demo_phase2.py")  # before ANY settings or database access
+    if refusal:
+        print(refusal, file=sys.stderr)
+        return 2
     settings = get_settings()
     await preflight(port)
     run = uuid.uuid4().hex[:8]

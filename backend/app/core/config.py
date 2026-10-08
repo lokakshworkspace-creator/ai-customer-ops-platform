@@ -1,3 +1,5 @@
+import os
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -78,3 +80,29 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def configured_app_env() -> str:
+    """APP_ENV as the application would see it (environment variable, else `.env`, else "dev"),
+    read WITHOUT building `Settings`. Building Settings validates everything, and a non-dev
+    environment with a weak JWT secret fails validation, so a script that wants to refuse to run
+    outside development must look at the raw value first and say so clearly."""
+    value = os.environ.get("APP_ENV")
+    if value is None and ENV_FILE.exists():
+        for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+            key, sep, rest = line.strip().partition("=")
+            if sep and key.strip().upper() == "APP_ENV":
+                value = re.split(r"\s+#", rest.strip())[0].strip().strip("\"'")
+                break
+    return (value or "dev").strip()
+
+
+def dev_only_refusal(tool: str) -> str | None:
+    """A message explaining why `tool` must not run, or None when APP_ENV is "dev"."""
+    env = configured_app_env()
+    if env == "dev":
+        return None
+    return (
+        f"{tool} refuses to run with APP_ENV={env!r}: it creates or deletes throw-away data and "
+        "is for local development only (APP_ENV=dev). Nothing was touched."
+    )
