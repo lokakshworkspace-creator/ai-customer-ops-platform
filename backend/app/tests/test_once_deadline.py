@@ -47,7 +47,7 @@ async def test_work_that_hangs_raises_deadline_exceeded_naming_the_phase() -> No
         await asyncio.Event().wait()
 
     with pytest.raises(DeadlineExceeded) as exc:
-        await run_with_deadline(work(), 0.3, phase, "relay --once")
+        await asyncio.wait_for(run_with_deadline(work(), 0.3, phase, "relay --once"), 10)
     message = str(exc.value)
     assert "relay --once exceeded its 0.3s deadline" in message
     assert "waiting on: waiting for the broker to acknowledge 3 events" in message
@@ -84,7 +84,9 @@ async def test_a_relay_stuck_connecting_to_the_broker_reports_that(
     await seed_events(committed_db.maker, 1, [EventType.REFUND_REQUESTED])
     relay = Relay(committed_db.maker, HangingProducer())
     with pytest.raises(DeadlineExceeded) as exc:
-        await run_with_deadline(relay.drain(), 1.0, relay.phase, "relay --once")
+        await asyncio.wait_for(
+            run_with_deadline(relay.drain(), 1.0, relay.phase, "relay --once"), 15
+        )
     assert "connecting the Kafka producer to Redpanda" in str(exc.value)
     # nothing was lost: the claimed row was rolled back and is still waiting in the outbox
     (row,) = await outbox_rows(committed_db.maker)
@@ -109,7 +111,7 @@ async def test_relay_main_exits_3_with_a_clear_message_on_timeout(
     monkeypatch.setattr(relay_module, "KafkaEventProducer", lambda *a, **kw: HangingProducer())
     monkeypatch.setattr(relay_module, "ensure_topics", _noop)
 
-    assert await relay_module.main(["--once", "--deadline", "1"]) == 3
+    assert await asyncio.wait_for(relay_module.main(["--once", "--deadline", "1"]), 20) == 3
     err = capsys.readouterr().err
     assert "relay: relay --once exceeded its 1s deadline" in err
     assert "connecting the Kafka producer to Redpanda" in err
@@ -156,7 +158,9 @@ async def test_a_consumer_stuck_in_its_handler_reports_that_and_loses_nothing(
     )
     consumer = EventConsumer(committed_db.maker, blocks_forever, cfg, kafka_env.producer())
     with pytest.raises(DeadlineExceeded) as exc:
-        await run_with_deadline(consumer.run(once=True), 15, consumer.phase, "consumer --once")
+        await asyncio.wait_for(
+            run_with_deadline(consumer.run(once=True), 15, consumer.phase, "consumer --once"), 40
+        )
     assert "applying the effect of the message at" in str(exc.value)
     assert kafka_env.refund_topic in str(exc.value)
 
@@ -199,7 +203,7 @@ def _run(module: str, port: int, deadline: int) -> subprocess.CompletedProcess:
         env=env,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=25,
     )
 
 
