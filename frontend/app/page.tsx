@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ABORTED,
   ApiError,
   ChatResponse,
   ToolResult,
@@ -16,6 +17,35 @@ import {
 
 const TOKEN_KEY = "ops.token";
 const POLL_MS = 5000;
+
+// sessionStorage can throw (private windows, blocked site data): the page must still work.
+const tokenStore = {
+  get(): string | null {
+    try {
+      return sessionStorage.getItem(TOKEN_KEY);
+    } catch {
+      return null;
+    }
+  },
+  set(value: string): void {
+    try {
+      sessionStorage.setItem(TOKEN_KEY, value);
+    } catch {
+      /* the session just will not survive a reload */
+    }
+  },
+  clear(): void {
+    try {
+      sessionStorage.removeItem(TOKEN_KEY);
+    } catch {
+      /* nothing to clear */
+    }
+  },
+};
+
+const messageOf = (err: unknown, fallback: string): string =>
+  err instanceof Error && err.message ? err.message : fallback;
+const isAborted = (err: unknown): boolean => err instanceof ApiError && err.code === ABORTED;
 
 type Turn = {
   key: string; // the client-generated message_id; resending it is safe (the server replays)
@@ -71,16 +101,34 @@ export default function Page() {
   const [conversationId, setConversationId] = useState<string | undefined>();
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [pollNote, setPollNote] = useState<string | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
+  const mounted = useRef(true);
+  const sending = useRef<AbortController | null>(null);
+
+  // EVERY effect below returns nothing or a cleanup FUNCTION. React calls whatever an effect
+  // returns as its cleanup, so an arrow with an expression body (`() => thing()`) is a bug
+  // whenever `thing()` returns something: a browser's (or polyfill's) scrollIntoView can return
+  // a Promise, which React then fails to call ("destroy is not a function").
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      sending.current?.abort(); // a reply that arrives after the page is gone is ignored
+    };
+  }, []);
 
   useEffect(() => {
-    setToken(sessionStorage.getItem(TOKEN_KEY));
+    setToken(tokenStore.get());
     setReady(true);
   }, []);
-  useEffect(() => bottom.current?.scrollIntoView({ behavior: "smooth" }), [turns]);
+
+  useEffect(() => {
+    bottom.current?.scrollIntoView?.({ behavior: "smooth" });
+  }, [turns]);
 
   const logout = useCallback(() => {
-    sessionStorage.removeItem(TOKEN_KEY);
+    tokenStore.clear();
     setToken(null);
     setTurns([]);
     setConversationId(undefined);
@@ -91,11 +139,12 @@ export default function Page() {
     setLoginError(null);
     try {
       const t = await login(email, password);
-      sessionStorage.setItem(TOKEN_KEY, t);
+      if (!mounted.current) return;
+      tokenStore.set(t);
       setToken(t);
       setPassword("");
     } catch (err) {
-      setLoginError(err instanceof ApiError ? err.message : "Login failed");
+      if (mounted.current) setLoginError(messageOf(err, "Login failed"));
     }
   }
 
@@ -104,24 +153,31 @@ export default function Page() {
 
   async function deliver(turn: Turn) {
     if (!token) return;
+    const ctrl = new AbortController();
+    sending.current = ctrl;
     setBusy(true);
     update(turn.key, { state: "sending", error: undefined });
     try {
-      const response = await sendChat(token, {
-        message: turn.text,
-        message_id: turn.key,
-        ...(conversationId ? { conversation_id: conversationId } : {}),
-      });
+      const response = await sendChat(
+        token,
+        {
+          message: turn.text,
+          message_id: turn.key,
+          ...(conversationId ? { conversation_id: conversationId } : {}),
+        },
+        ctrl.signal,
+      );
+      if (!mounted.current) return;
       setConversationId(response.conversation_id);
       update(turn.key, { state: "done", response });
     } catch (err) {
+      if (!mounted.current || isAborted(err)) return;
       if (err instanceof ApiError && err.status === 401) return logout();
-      update(turn.key, {
-        state: "error",
-        error: err instanceof ApiError ? err.message : "Something went wrong",
-      });
+      update(turn.key, { state: "error", error: messageOf(err, "Something went wrong") });
     } finally {
-      setBusy(false);
+      // however the request ended, the page must never stay stuck in "sending"
+      if (sending.current === ctrl) sending.current = null;
+      if (mounted.current) setBusy(false);
     }
   }
 
@@ -140,23 +196,51 @@ export default function Page() {
   const waiting = turns.filter(
     (t) => t.response?.status === "waiting_approval" && !t.resolved,
   );
+  // The effect reads the CURRENT list through a ref, so the timer is only recreated when the set
+  // of waiting turns (or the login) changes, not on every render.
+  const waitingRef = useRef(waiting);
+  const waitingKeys = waiting.map((t) => t.key).join(",");
   useEffect(() => {
-    if (!token || waiting.length === 0) return;
-    const id = setInterval(async () => {
-      for (const t of waiting) {
-        try {
-          const w = await getWorkflow(token, t.response!.workflow_id);
+    waitingRef.current = waiting;
+  });
+  useEffect(() => {
+    if (!token || !waitingKeys) return;
+    const ctrl = new AbortController();
+    let cancelled = false;
+    let running = false; // never two polls at once if the server is slow
+
+    async function poll() {
+      if (running || cancelled || !token) return;
+      running = true;
+      try {
+        for (const t of waitingRef.current) {
+          if (cancelled || !t.response) return;
+          const w = await getWorkflow(token, t.response.workflow_id, ctrl.signal);
+          if (cancelled) return;
+          setPollNote(null);
           if (!w.waiting_for_approval) {
             update(t.key, { resolved: { status: w.status, message: w.latest_message } });
           }
-        } catch (err) {
-          if (err instanceof ApiError && err.status === 401) logout();
         }
+      } catch (err) {
+        if (cancelled || isAborted(err)) return;
+        if (err instanceof ApiError && err.status === 401) return logout();
+        // a failed poll is shown calmly and retried on the next tick; it never breaks the page
+        setPollNote(`Could not check the approval status (${messageOf(err, "error")}). Retrying…`);
+      } finally {
+        running = false;
       }
+    }
+
+    const id = setInterval(() => {
+      void poll();
     }, POLL_MS);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, waiting.map((t) => t.key).join(",")]);
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+      clearInterval(id);
+    };
+  }, [token, waitingKeys, logout]);
 
   if (!ready) return null;
 
@@ -258,6 +342,7 @@ export default function Page() {
                 {t.response.status === "waiting_approval" && !t.resolved && (
                   <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                     ⏳ Waiting for human approval. This page checks every few seconds.
+                    {pollNote && <span className="mt-1 block text-xs">{pollNote}</span>}
                   </p>
                 )}
                 {t.resolved?.message && (

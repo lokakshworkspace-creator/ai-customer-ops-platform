@@ -42,6 +42,8 @@ export class ApiError extends Error {
   }
 }
 
+export const ABORTED = "ABORTED";
+
 async function request<T>(
   path: string,
   init: RequestInit,
@@ -57,6 +59,7 @@ async function request<T>(
       },
     });
   } catch {
+    if (init.signal?.aborted) throw new ApiError(0, "Request cancelled", ABORTED);
     throw new ApiError(0, "Could not reach the server. Check your connection and try again.");
   }
   const body = await res.json().catch(() => ({}));
@@ -78,16 +81,25 @@ export async function login(email: string, password: string): Promise<string> {
 export async function sendChat(
   token: string,
   body: { message: string; message_id: string; conversation_id?: string },
+  signal?: AbortSignal,
 ): Promise<ChatResponse> {
   const { data } = await request<ChatResponse>(
     "/api/v1/chat",
-    { method: "POST", body: JSON.stringify(body) },
+    { method: "POST", body: JSON.stringify(body), signal },
     token,
   );
   return data;
 }
 
-export async function getWorkflow(token: string, id: string): Promise<WorkflowView> {
-  const { data } = await request<WorkflowView>(`/api/v1/workflows/${id}`, { method: "GET" }, token);
+export async function getWorkflow(
+  token: string,
+  id: string,
+  signal?: AbortSignal,
+): Promise<WorkflowView> {
+  const { data } = await request<WorkflowView>(
+    `/api/v1/workflows/${id}`,
+    { method: "GET", signal },
+    token,
+  );
   return data;
 }
