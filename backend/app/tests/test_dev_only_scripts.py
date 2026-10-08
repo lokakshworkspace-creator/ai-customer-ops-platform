@@ -132,3 +132,46 @@ def test_the_demo_as_a_real_process_exits_2_with_a_clear_message_and_no_tracebac
     assert "demo_phase2.py refuses to run with APP_ENV='prod'" in done.stderr
     assert "Traceback" not in done.stderr and "ValidationError" not in done.stderr
     assert "cannot reach" not in done.stderr
+
+
+# --- the phase 3 demo ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("env", ["test", "prod", "staging"])
+@pytest.mark.parametrize("prepare_only", [False, True])
+async def test_the_chat_demo_refuses_outside_dev_before_touching_anything(
+    monkeypatch, capsys, env: str, prepare_only: bool
+) -> None:
+    demo = load("demo_phase3")
+
+    def touched(*a, **kw):
+        raise AssertionError("the demo touched settings or the database before refusing")
+
+    monkeypatch.setattr(demo, "get_settings", touched)
+    monkeypatch.setattr(demo, "preflight", touched)
+    monkeypatch.setattr(demo.d2, "create_demo_data", touched)
+    monkeypatch.setenv("APP_ENV", env)
+
+    assert await demo.main(8000, prepare_only) == 2
+    err = capsys.readouterr().err
+    assert f"demo_phase3.py refuses to run with APP_ENV={env!r}" in err
+
+
+def test_the_chat_demo_as_a_real_process_exits_2_outside_dev() -> None:
+    env = {
+        **os.environ,
+        "APP_ENV": "prod",
+        "PYTHONIOENCODING": "utf-8",
+        "DATABASE_URL": "postgresql+asyncpg://x:x@127.0.0.1:1/x",
+    }
+    done = subprocess.run(
+        [sys.executable, str(SCRIPTS / "demo_phase3.py")],
+        cwd=BACKEND,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,  # a cold Python start alone can take ~11 s
+    )
+    assert done.returncode == 2
+    assert "demo_phase3.py refuses to run with APP_ENV='prod'" in done.stderr
+    assert "Traceback" not in done.stderr

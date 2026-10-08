@@ -17,6 +17,7 @@ from app.core.security import hash_password
 from app.db.models import (
     Approval,
     AuditLog,
+    Message,
     Order,
     OrderItem,
     Payment,
@@ -29,6 +30,7 @@ from app.db.models import (
 )
 from app.db.models.enums import (
     ApprovalStatus,
+    MessageRole,
     OrderStatus,
     PaymentStatus,
     PolicyDecision,
@@ -59,6 +61,7 @@ TABLES = [
     "processed_events",
     "tickets",
     "workflow_runs",
+    "messages",
 ]
 # Everything is deleted by this script except nothing: every table above can hold demo rows.
 PER_GROUP = {  # rows `world()` creates for ONE customer + ONE admin
@@ -74,6 +77,7 @@ PER_GROUP = {  # rows `world()` creates for ONE customer + ONE admin
     "processed_events": 4,
     "tickets": 1,
     "workflow_runs": 1,
+    "messages": 2,
 }
 
 
@@ -186,7 +190,19 @@ async def world(maker: async_sessionmaker[AsyncSession], prefix: str, tag: str) 
             ]
         )
         s.add(Ticket(user_id=customer.id, subject="s", body="d"))
-        s.add(WorkflowRun(user_id=customer.id, state="start"))
+        run = WorkflowRun(user_id=customer.id, state="start")
+        s.add(run)
+        await s.flush()
+        for role, who in ((MessageRole.user, customer.id), (MessageRole.assistant, customer.id)):
+            s.add(
+                Message(
+                    conversation_id=uuid.uuid4(),
+                    user_id=who,
+                    workflow_run_id=run.id,
+                    role=role,
+                    content=[{"type": "text", "text": "hi"}],
+                )
+            )
         events = []
         for refund in refunds:
             for event_type in (EventType.REFUND_REQUESTED, EventType.REFUND_COMPLETED):

@@ -78,5 +78,21 @@
     "old": "    if env == \"dev\":\n        return None\n",
     "new": "    if True:\n        return None\n",
     "tests": "app/tests/test_dev_only_scripts.py"
+  },
+  {
+    "id": "D3",
+    "desc": "demo_phase3 runs outside dev",
+    "file": "../scripts/demo_phase3.py",
+    "old": "    if refusal:\n",
+    "new": "    if False:\n",
+    "tests": "app/tests/test_dev_only_scripts.py"
+  },
+  {
+    "id": "C9",
+    "desc": "chat messages are not selected (the users could not be deleted)",
+    "file": "../scripts/demo_cleanup.py",
+    "old": "p.message_ids = await _ids(s, Message.id, _in(Message.user_id, p.user_ids))",
+    "new": "p.message_ids = []",
+    "tests": "app/tests/test_demo_cleanup.py"
   }
 ]

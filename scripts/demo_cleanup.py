@@ -4,12 +4,12 @@
     backend/.venv/Scripts/python scripts/demo_cleanup.py --apply    # actually delete
 
 WHAT COUNTS AS DEMO DATA. Users whose email starts with "demo-" and everything that belongs to
-them: their orders (and order items), the payments of those orders, refunds (requested by them or
-against their orders/payments), approvals (of those refunds, or requested/decided by them),
-tool_calls made by them, audit_logs (acted by them, or about any of the rows above), outbox events
-about those rows, the consumer-dedupe rows (processed_events) of those outbox events, and, if a demo
-user ever got them, tickets and workflow runs. Nothing else is selected; the seeded users and every
-other user are never touched.
+them: their chat messages and workflow runs, their orders (and order items), the payments of those
+orders, refunds (requested by them or against their orders/payments), approvals (of those refunds,
+or requested/decided by them), tool_calls made by them, audit_logs (acted by them, or about any of
+the rows above), outbox events about those rows, the consumer-dedupe rows (processed_events) of
+those outbox events, and tickets. Nothing else is selected; the seeded users and every other user
+are never touched.
 
 SAFETY.
   * Dry run by default; it prints the exact counts that --apply would delete, and --apply deletes
@@ -33,6 +33,7 @@ from app.core.config import dev_only_refusal
 from app.db.models import (
     Approval,
     AuditLog,
+    Message,
     Order,
     OrderItem,
     OutboxEvent,
@@ -66,6 +67,7 @@ class Plan:
     tool_call_ids: list[Any] = field(default_factory=list)
     ticket_ids: list[Any] = field(default_factory=list)
     workflow_ids: list[Any] = field(default_factory=list)
+    message_ids: list[Any] = field(default_factory=list)
     audit_ids: list[Any] = field(default_factory=list)
     outbox_ids: list[Any] = field(default_factory=list)
 
@@ -130,6 +132,7 @@ async def build_plan(s: AsyncSession) -> Plan:
     p.tool_call_ids = await _ids(s, ToolCall.id, _in(ToolCall.user_id, p.user_ids))
     p.ticket_ids = await _ids(s, Ticket.id, _in(Ticket.user_id, p.user_ids))
     p.workflow_ids = await _ids(s, WorkflowRun.id, _in(WorkflowRun.user_id, p.user_ids))
+    p.message_ids = await _ids(s, Message.id, _in(Message.user_id, p.user_ids))
     ids = p.resource_ids
     p.audit_ids = await _ids(
         s, AuditLog.id, or_(_in(AuditLog.actor_user_id, p.user_ids), _in(AuditLog.resource_id, ids))
@@ -183,6 +186,7 @@ def statements(p: Plan) -> list[tuple[str, Table, ColumnElement[bool]]]:
         ("order_items", OrderItem.__table__, _in(OrderItem.order_id, p.order_ids)),
         ("tickets", Ticket.__table__, _in(Ticket.id, p.ticket_ids)),
         ("orders", Order.__table__, _in(Order.id, p.order_ids)),
+        ("messages", Message.__table__, _in(Message.id, p.message_ids)),
         ("workflow_runs", WorkflowRun.__table__, _in(WorkflowRun.id, p.workflow_ids)),
         ("users", User.__table__, _in(User.id, p.user_ids)),
     ]
