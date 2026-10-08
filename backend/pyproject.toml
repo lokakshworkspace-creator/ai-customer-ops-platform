@@ -60,3 +60,4 @@ extend-immutable-calls = [
 [tool.ruff.lint.per-file-ignores]
 "app/db/migrations/versions/*" = ["E501", "I001", "UP007"]
 "app/api/routers/refunds.py" = ["E501"]  # wide markdown table in the OpenAPI description
+"../scripts/demo_phase2.py" = ["E501"]  # human-readable output strings
