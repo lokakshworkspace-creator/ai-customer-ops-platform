@@ -14,5 +14,77 @@
     "old": "for t in registry.agent_tools()",
     "new": "for t in registry.all()",
     "tests": "app/tests/test_agent_tools_view.py"
+  },
+  {
+    "id": "A3",
+    "desc": "the refund idempotency key is a constant (two messages share one key)",
+    "file": "app/agent/orchestrator.py",
+    "old": "idempotency_key=derive_idempotency_key(\n                t.conversation_id, t.message_id, use.name, canonical\n            ),",
+    "new": "idempotency_key=\"agent-constant-key-1\",",
+    "tests": "app/tests/test_agent_orchestrator.py"
+  },
+  {
+    "id": "A4",
+    "desc": "the key ignores message_id (a second message replays the first refund)",
+    "file": "app/agent/orchestrator.py",
+    "old": "t.conversation_id, t.message_id, use.name, canonical\n",
+    "new": "t.conversation_id, t.conversation_id, use.name, canonical\n",
+    "tests": "app/tests/test_agent_orchestrator.py"
+  },
+  {
+    "id": "A5",
+    "desc": "the tool-call caps never trigger",
+    "file": "app/agent/fsm.py",
+    "old": "return used_this_turn >= self.per_turn or used_in_conversation >= self.per_conversation",
+    "new": "return False",
+    "tests": "app/tests/test_agent_fsm.py app/tests/test_agent_orchestrator.py"
+  },
+  {
+    "id": "A6",
+    "desc": "a repeated message_id no longer replays the stored response",
+    "file": "app/agent/orchestrator.py",
+    "old": "        if run.response is not None:\n",
+    "new": "        if False:\n",
+    "tests": "app/tests/test_agent_orchestrator.py"
+  },
+  {
+    "id": "A7",
+    "desc": "anyone can continue anyone's conversation",
+    "file": "app/agent/orchestrator.py",
+    "old": "if await store.conversation_owner(session, conversation_id) != actor.id:",
+    "new": "if False:",
+    "tests": "app/tests/test_agent_orchestrator.py"
+  },
+  {
+    "id": "A8",
+    "desc": "tool results reach the model unfiltered (user ids, notes, hashes)",
+    "file": "app/agent/results_view.py",
+    "old": "    data = data or {}\n    if tool == \"list_orders\":",
+    "new": "    return data or {}\n    if tool == \"list_orders\":",
+    "tests": "app/tests/test_agent_fsm.py"
+  },
+  {
+    "id": "A9",
+    "desc": "max_tokens is not sent on model calls",
+    "file": "app/agent/orchestrator.py",
+    "old": "max_tokens=s.llm_max_tokens,",
+    "new": "max_tokens=100000,",
+    "tests": "app/tests/test_agent_orchestrator.py"
+  },
+  {
+    "id": "A10",
+    "desc": "the whole history is sent to the model",
+    "file": "app/agent/orchestrator.py",
+    "old": "messages=trim_history(t.history, s.llm_history_messages),",
+    "new": "messages=t.history,",
+    "tests": "app/tests/test_agent_orchestrator.py"
+  },
+  {
+    "id": "A11",
+    "desc": "sync finishes an already-finished workflow again (a second GET adds a second message)",
+    "file": "app/agent/resume.py",
+    "old": "if run is None or run.status != WorkflowStatus.waiting_approval:",
+    "new": "if run is None:",
+    "tests": "app/tests/test_agent_orchestrator.py"
   }
 ]

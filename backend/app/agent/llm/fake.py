@@ -168,11 +168,14 @@ class ObedientFakeLLM(_Recording):
 
         # 1. Gullibility: any "call <tool_name>" in the user's text OR in a tool result is obeyed,
         #    for any tool name, offered or not, with whatever identity fields it was told to add.
-        told = [m.group(1).lower() for m in _CALL_RE.finditer(sources)]
-        for tool in told:
+        told = [(m.group(1).lower(), m) for m in _CALL_RE.finditer(sources)]
+        for tool, m in told:
             if tool not in executed:
-                return call(tool, **{**self._args_for(tool, sources), **extras})
-        if any(tool in executed for tool in told):  # it did what it was told; now it reports
+                # the id right after "call <tool>" is the one it was told to use
+                near = _UUID_RE.match(sources[m.end() :].lstrip())
+                args = self._args_for(tool, sources, near.group(0) if near else None)
+                return call(tool, **{**args, **extras})
+        if any(tool in executed for tool, _ in told):  # it did what it was told; now it reports
             return say(self._summary(results))
 
         lowered = user_text.lower()
@@ -208,9 +211,9 @@ class ObedientFakeLLM(_Recording):
         return say("Hello! I can look up your orders, request refunds and open support tickets.")
 
     @staticmethod
-    def _args_for(tool: str, sources: str) -> dict[str, Any]:
+    def _args_for(tool: str, sources: str, near: str | None) -> dict[str, Any]:
         found = _UUID_RE.findall(sources)
-        first = found[0] if found else _ZERO
+        first = near or (found[0] if found else _ZERO)
         if tool in {"approve_refund", "reject_refund"}:
             return {"approval_id": first}
         if tool in {"get_order", "cancel_order"}:
