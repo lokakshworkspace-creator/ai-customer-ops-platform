@@ -2,26 +2,26 @@
 
 An AI-powered customer-operations platform. Customers ask for things like order lookups, cancellations, refunds, support tickets and FAQ answers; an LLM agent turns each request into a **proposed action**, and the **backend decides** whether that action is allowed, needs human approval, or is denied. The model never executes anything itself.
 
-**Status: Phases 0–1 of 7 are built — the secure foundation (database, auth, owner-scoped orders API).** The agent, policy engine, refunds, RAG and UI are planned but **not built yet**; this README only describes what exists.
+**Status: Phases 0–2 of 7 are built — the secure foundation, a policy engine, a tool executor, idempotent refunds with human approval, and a transactional-outbox event pipeline over Redpanda.** The LLM agent, RAG and UI are planned but **not built yet**; this README only describes what exists.
 
-Stack: Python 3.12+, FastAPI, SQLAlchemy 2 (async), Alembic, Pydantic v2, PostgreSQL 16 + pgvector, Redis, Redpanda, pytest.
+Stack: Python 3.12+, FastAPI, SQLAlchemy 2 (async), Alembic, Pydantic v2, PostgreSQL 16 + pgvector, Redis, Redpanda (aiokafka), pytest.
 
 ## Status
 
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Foundation: docker-compose (Postgres+pgvector, Redis, Redpanda), FastAPI skeleton, typed config, structured logging, request IDs, `/health` | **Done** |
-| 1 | Core domain + auth: 11-table schema and Alembic migration, seed data, JWT login, role-based access, owner-scoped orders API, 130 tests | **Done** |
-| 2 | Tools, policy engine, refunds (idempotent), outbox relay/consumers | Planned |
+| 1 | Core domain + auth: 11-table schema and Alembic migration, seed data, JWT login, role-based access, owner-scoped orders API; 130 tests at the end of Phase 1 | **Done** |
+| 2 | Policy engine (`rules.yaml`), tool registry + executor, idempotent refunds with approvals and a (simulated) payment provider, reconcile job, outbox relay + notification consumer | **Done** |
 | 3 | LLM agent (FSM orchestration), first UI | Planned |
 | 4 | RAG over policy/FAQ documents | Planned |
-| 5 | Human approval flow, events | Planned |
+| 5 | Human approval UI flow, more events | Planned |
 | 6 | Resilience, observability, evals | Planned |
 | 7 | Polish | Planned |
 
-What exists today beyond the four endpoints below: tables for payments, refunds, tickets, workflow runs, approvals, tool calls, outbox events and audit logs are created by the migration, but nothing reads or writes them yet. Redis, Redpanda and the `pgvector` extension are provisioned but unused.
+What Phase 2 added, in one paragraph: every action goes through **validate → authorize → policy → execute → log** (`app/tools/executor.py`); the **policy engine** (`app/policy/`, pure functions driven by `app/policy/rules.yaml`) returns `ALLOW`, `REQUIRE_APPROVAL` or `DENY` with a reason code; a **refund** is idempotent (per-user `Idempotency-Key` + a database `UNIQUE` constraint), is paid out by a provider call made *outside* any database transaction, and above the automatic limit waits for a different admin to approve it; every state change also writes an **outbox** row in the same transaction, which a separate **relay** publishes to Redpanda and a **consumer** (which only logs a "notification" line for now) processes at-least-once with de-duplication. Redis is still provisioned but unused.
 
-### API today
+### API today (9 endpoints)
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
@@ -29,12 +29,19 @@ What exists today beyond the four endpoints below: tables for payments, refunds,
 | POST | `/api/v1/auth/login` | none | `{email, password}` → bearer token |
 | GET | `/api/v1/orders` | bearer | Paginated (`limit` 1–100, default 20; `offset`), newest first. Customers see only their own orders; admins see all |
 | GET | `/api/v1/orders/{order_id}` | bearer | `404` if the order doesn't exist **or belongs to someone else** |
+| POST | `/api/v1/refunds` | bearer + `Idempotency-Key` header | Request a refund. `201` paid / `202` waiting for approval / `200` replay / `403` denied by policy / `409` key reused with a different payload. Full table in [`docs/refunds-api.md`](docs/refunds-api.md) |
+| GET | `/api/v1/refunds/{refund_id}` | bearer | A refund on one of your orders (admins: any); anything else is `404` |
+| GET | `/api/v1/approvals` | admin | Approvals, `status=pending` by default; paginated |
+| POST | `/api/v1/approvals/{approval_id}/approve` | admin | Pays the refund out. The approver must differ from the requester (`403 SELF_APPROVAL`) |
+| POST | `/api/v1/approvals/{approval_id}/reject` | admin | Rejects the refund |
+
+The agent tools `get_order`, `list_orders`, `create_ticket`, `cancel_order`, `request_refund`, `approve_refund` and `reject_refund` are registered in `app/tools/` and are exercised by tests through the executor. Only the refund and approval tools have HTTP endpoints; ticket creation and order cancellation are reachable only through the executor until the agent exists (Phase 3). The two admin tools are never marked `agent_visible`.
 
 Interactive docs: `http://127.0.0.1:8000/docs` once the API is running.
 
 ## Quick start
 
-Prerequisites: Git, Python 3.12+ (developed on 3.13), Docker with Compose v2, and free localhost ports 5432, 6379 and 9092. Run everything from the repo root unless stated. Developed and tested on Windows; the Mac/Linux commands are the same steps with POSIX paths (see the note under them).
+Prerequisites: Git, Python 3.12+ (developed on 3.13), Docker with Compose v2, and free localhost ports 5432, 6379 and 9092 (8000 for the API). Run everything from the repo root unless stated. Developed and tested on Windows; the Mac/Linux commands are the same steps with POSIX paths (see the note under them).
 
 ### Windows (PowerShell)
 
@@ -46,7 +53,7 @@ docker compose ps                      # wait until all three show "healthy"
 cd backend
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -e ".[dev]"
-.\.venv\Scripts\python -m alembic upgrade head      # create the schema
+.\.venv\Scripts\python -m alembic upgrade head      # create the schema (head = 0002)
 .\.venv\Scripts\python ..\scripts\seed.py           # load demo users and orders
 .\.venv\Scripts\python -m uvicorn app.main:app --reload
 ```
@@ -75,21 +82,29 @@ python3 -m venv .venv
 .venv/bin/python -m pytest
 ```
 
-The commands were run on Windows (the shell-agnostic ones — `docker compose`, `alembic`, the seed script, `uvicorn`, `curl` — also from Git Bash). The `.venv/bin/...` paths and `python3` are the standard POSIX equivalents of the Windows venv layout and are **unverified** here.
+The commands were run on Windows (the shell-agnostic ones — `docker compose`, `alembic`, the seed script, `uvicorn`, `curl` — also from Git Bash). The `.venv/bin/...` paths and `python3` are the standard POSIX equivalents of the Windows venv layout and are **unverified** here, as is the whole project on Linux/macOS.
 
-The tests need Postgres running. They create and rebuild a separate database called `ops_test` through the real Alembic migration and never touch the dev database `ops`.
+If you created your virtualenv before Phase 2, run `pip install -e ".[dev]"` again: Phase 2 added `aiokafka` and `pyyaml`, and the dev extras now include `pytest-timeout`.
 
-### Running the tests: the `kafka` marker
+The tests need Postgres running. They create and rebuild a separate database called `ops_test` through the real Alembic migration and never touch the dev database `ops`. Some tests also need Redpanda (see the next section).
 
-Tests that talk to the real Redpanda (the outbox relay, the consumer, the end-to-end event flow) carry the pytest marker `kafka`. It is applied automatically to every test that uses the `kafka_env` fixture, and markers are strict, so a typo is an error. Run from `backend/` (timings measured on the development machine, Windows, warm caches):
+### Running the tests
+
+Run from `backend/`. Numbers below are measured on the development machine (Windows, warm caches); `pytest --collect-only -q` reports **643** tests.
 
 ```powershell
-.\.venv\Scripts\python -m pytest                      # everything: 603 passed, 1 skipped, about 3.5 min
-.\.venv\Scripts\python -m pytest -m "not kafka"       # fast suite, needs Postgres only: 576 passed, about 1.5 min
+.\.venv\Scripts\python -m pytest                      # everything: 642 passed, 1 skipped, about 3 min 50 s
+.\.venv\Scripts\python -m pytest -m "not kafka"       # fast suite, needs Postgres only: 615 passed, about 2 min
 .\.venv\Scripts\python -m pytest -m kafka             # only the Redpanda-backed tests: 27 passed, 1 skipped, about 2 min
 ```
 
-The fast suite was verified to pass with the Redpanda container stopped. The one skipped test sends `SIGTERM` to a child process and only runs on POSIX. The very first Python start after the machine has been idle can take around 10 s for the imports alone (the virtualenv's ~4,800 files are read cold), so a first run may look much slower than the numbers above.
+* **The `kafka` marker.** Tests that talk to the real Redpanda (the outbox relay, the consumer, the end-to-end event flow) carry it. It is applied automatically to every test that uses the `kafka_env` fixture, markers are strict (a typo is an error), and a test fails if a Redpanda test lacks the marker. The fast suite was verified to pass with the Redpanda container stopped: `docker compose stop redpanda`, then `-m "not kafka"` gave 615 passed in 117 s, then `docker compose start redpanda`.
+* **Per-test timeout.** `pytest-timeout` is configured with 180 s per test (`pyproject.toml`). **On Windows a hanging test does not just fail: the whole pytest run is aborted.** Windows has no `SIGALRM`, so pytest-timeout can only use its *thread* method. Tested with `-o timeout=3` on a hanging test placed between passing ones: the earlier tests print `PASSED`; at the hanging test pytest prints `+++ Timeout +++` and a stack dump of every thread (showing the line it was stuck on, e.g. `time.sleep(60)`) and the process exits with code 1 after about 3 s. The hanging test is never reported as `FAILED`, there is no summary line, and the tests after it **do not run** (a test pins this behaviour). On Linux/macOS the default *signal* method is expected to fail only the hanging test and continue; that is pytest-timeout's documented behaviour and is **unverified** here.
+* **The skipped test** sends `SIGTERM` to a child process and only runs on POSIX.
+* **Cold starts are slow.** The very first Python start after the machine has been idle can take ~11 s for the imports alone (the virtualenv's ~4,800 files are read cold), so real-process tests allow 60 s while the application-level `--deadline` they pass stays short.
+* **One unexplained slow run.** A single run of the fast suite once reported 4214 s (70 min) for tests that normally take about 2 minutes; the same tests passed. It was not reproduced in later runs (99–124 s) and is probably the machine sleeping, but that was not confirmed. `pytest-timeout` now guards against hangs.
+
+The security- and correctness-critical code was also validated by **mutation**: 56 deliberate defects, one at a time, in five lists under [`scripts/mutation/`](scripts/mutation/README.md), each of which the tests must catch (`python scripts/mutation/run.py --list`).
 
 ### Seeded logins (local development only)
 
@@ -172,37 +187,101 @@ GET  /api/v1/orders           -> 401 {"detail":"Not authenticated"}      (no tok
 
 Money is serialised as exact decimal strings (`"1499.00"`), never floats.
 
+## The Phase 2 demo: refund → policy → outbox → relay → Redpanda → consumer
+
+`scripts/demo_phase2.py` starts the API, the outbox relay and the notification consumer as three separate processes, walks through four scenarios, prints the refund / outbox / notification state after each, and stops everything it started **by PID**. From the repo root, with Postgres, Redis and Redpanda up and the schema migrated (no seed data needed):
+
+```powershell
+backend\.venv\Scripts\python scripts\demo_phase2.py
+```
+
+| Scenario | What it does | Outcome |
+|---|---|---|
+| a | A 250.00 refund on a delivered order (within the 500.00 automatic limit) | `201`, `succeeded`, three notification lines |
+| b | A 700.00 refund (above the 500.00 limit) | `202 pending_approval`; a different admin approves → `200`, paid, three notification lines |
+| c | The same `Idempotency-Key` again (then with a different payload) | `200` replay with no new rows / `409` |
+| d | A 50000.00 refund | `403 AMOUNT_EXCEEDS_ORDER`, nothing created, but the denial is in `tool_calls` |
+
+It is **repeatable**: every run inserts its own customer, admin (`demo-customer-<run>@…`, `demo-admin-<run>@…`), two delivered orders and succeeded payments, uses unique idempotency keys, and never reads, changes or deletes anything else, so every run prints the same final `OUTCOMES {…}` line. A run takes about 20 s (last measured: 18 s, `17/17 checks passed`).
+
+The demo **refuses to run unless `APP_ENV=dev`** (exit 2, before it touches any settings or database). Its rows stay in the dev database; they are clearly named and can be removed with the cleanup script below.
+
+### Removing demo data: `scripts/demo_cleanup.py` (dev only, deletes audit logs)
+
+```powershell
+backend\.venv\Scripts\python scripts\demo_cleanup.py            # dry run (default): prints exact counts, changes nothing
+backend\.venv\Scripts\python scripts\demo_cleanup.py --apply    # deletes them, in one transaction
+```
+
+It selects the users whose email starts with `demo-` and everything that belongs to them: their orders and items, payments, refunds, approvals, tool calls, **audit logs** (including audit rows *about* those refunds written by other users), outbox events and their consumer de-duplication rows. **It deliberately deletes `audit_logs` rows, which are otherwise append-only, so it is dev-only by design:** it refuses to run unless `APP_ENV=dev` (exit 2), and it stops without deleting anything (exit 1) if a demo row is entangled with real data (for example a demo admin who decided a real customer's approval). Seeded users and every other user are never selected. Last dry run on the dev database: 10 demo users, 200 rows.
+
+### Running the pipeline processes yourself
+
+```powershell
+# from backend/, each in its own terminal (API: uvicorn as in the quick start)
+.\.venv\Scripts\python -m app.events.relay                          # publishes outbox rows to Redpanda
+.\.venv\Scripts\python -m app.events.consumers.notifications        # logs a "notification" line per event
+.\.venv\Scripts\python -m app.events.relay --once                   # drain what is due, then exit
+.\.venv\Scripts\python -m app.events.consumers.notifications --once # drain the backlog, then exit
+```
+
+`--once` has a hard overall deadline (default 120 s, `--deadline SECONDS`, `0` disables, or `ONCE_DEADLINE_S`): if it passes, the process exits with code **3** and a message that says what it was waiting on, instead of hanging. Both processes finish their current unit of work on `SIGINT`/`SIGTERM`. Operational scripts, all run from `backend/` as `..\scripts\<name>.py`:
+
+| Script | Purpose |
+|---|---|
+| `reconcile_refunds.py [--dry-run] [--allow-simulated]` | Re-check refunds stuck in `processing` (provider call outcome unknown). Refuses the in-memory simulated provider unless `--allow-simulated` |
+| `outbox_admin.py list [--state …]` / `unpark …` | Inspect outbox rows; put parked (retries exhausted) events back in the queue |
+| `kafka_smoke.py` | Produce and consume one message against the local Redpanda |
+
+Event formats, delivery guarantees and failure handling: [`docs/events.md`](docs/events.md).
+
 ## Security design
 
 - **Passwords:** argon2id (`argon2-cffi` defaults). Hashes created with older, weaker parameters are transparently upgraded on the next successful login.
 - **JWT:** HS256 is pinned in code (`algorithms=["HS256"]`; the token header's `alg` is never trusted, and `alg=none` is rejected). `exp` and `sub` are required. Lifetime defaults to 30 minutes.
 - **Role comes from the database, not the token.** Tokens carry identity only (`sub`, `iat`, `exp`). On every request the user is reloaded from Postgres, so deactivating, deleting or demoting a user takes effect immediately, and a validly signed token that *claims* `role: admin` still gets customer powers (covered by tests).
 - **No account enumeration on login:** unknown email, wrong password and inactive account all return the identical `401 {"detail":"Invalid email or password"}`, and an argon2 verification against a dummy hash runs for unknown emails so the work done is the same.
-- **404, not 403, for other users' orders.** The owner filter is applied in the repository query itself, so another customer's order is indistinguishable from a nonexistent one (same status, body and headers) and order IDs can't be probed. List totals are scoped the same way. Only an explicit `admin` role sees everything; any other role sees only its own orders.
+- **404, not 403, for other users' orders and refunds.** The owner filter is applied in the repository query itself, so another customer's resource is indistinguishable from a nonexistent one (same status, body and headers). Only an explicit `admin` role sees everything.
+- **The backend decides, always with a reason.** Every tool call is validated (unknown fields are rejected, so a caller can never smuggle in a `user_id`), authorized by role, evaluated by the policy engine, executed, and logged in `tool_calls` and `audit_logs` — including denied and invalid calls. Caller identity comes only from the authenticated user. Business thresholds live in `rules.yaml` and are validated when loaded (a bad file fails fast instead of weakening a rule); a document or a model can never override them.
+- **Refunds are idempotent in the database.** `UNIQUE(requested_by, idempotency_key)` is the source of truth (keys are per user; the same key from two users makes two refunds), a canonical request hash turns "same key, different payload" into `409`, concurrent identical requests (tested with 10 at once) make exactly one refund and one provider payout, and the provider is called with its own key `refund-<uuid>`, not the user's.
+- **No payout inside a database transaction.** Locks are taken in a fixed order (order → user → refund → approval); the provider call happens with no transaction or lock held, and an unknown outcome is recorded as `processing` for the reconcile script.
+- **Separation of duties:** the admin who approves a refund must differ from the one who requested it (`SELF_APPROVAL` is a policy `DENY`).
+- **Events carry ids and state only.** No names, emails or free text can enter an event: the writer rejects unlisted fields and the consumer dead-letters messages that have them.
 - **Production secret guard:** the app refuses to start when `APP_ENV` is anything other than `dev` and `JWT_SECRET` is the built-in dev default or shorter than 32 characters.
-- **Request IDs are sanitised:** an inbound `X-Request-ID` is only honoured if it fully matches `^[A-Za-z0-9_-]{8,64}$` (so newlines or odd characters can't reach logs or response headers); otherwise a fresh one is generated. It is bound to every log line and echoed in the response.
-- **Smaller points:** `/health` reports only `ok`/`error` per dependency (details go to logs); published Docker ports are bound to `127.0.0.1`; money is `Numeric(12,2)` with a currency column.
-
-The security-relevant tests were validated by mutation: the authorisation, token and login code was deliberately broken, one defect at a time, to confirm the tests fail (details in the Phase 0–1 report).
+- **Request IDs are sanitised:** an inbound `X-Request-ID` is only honoured if it fully matches `^[A-Za-z0-9_-]{8,64}$`; otherwise a fresh one is generated. It is bound to every log line and echoed in the response.
+- **Smaller points:** `/health` reports only `ok`/`error` per dependency; published Docker ports are bound to `127.0.0.1`; money is `Numeric(12,2)` with a currency column.
 
 ## Known limitations
 
+- **The LLM agent, RAG and UI do not exist yet** (Phases 3–4). Nothing calls a model; the "agent" side is only the tool registry and executor that it will use.
+- **The payment provider is a simulation.** `SimulatedPaymentProvider` is in-memory; the reconcile script refuses it unless told otherwise. No real payment service is integrated.
+- **The notification consumer only logs.** It proves at-least-once, de-duplicated, dead-lettering consumption; it does not send email or messages.
 - **No login rate limiting or lockout yet** — brute-force protection is absent (planned with Redis in a later phase).
-- **No token revocation or refresh.** A token stays valid until it expires (30 minutes). Deactivated or deleted users are blocked immediately because the user is reloaded per request, but there is no way to revoke a single token.
+- **No token revocation or refresh.** A token stays valid until it expires (30 minutes). Deactivated or deleted users are blocked immediately because the user is reloaded per request.
+- **A parked outbox event blocks later events for the same refund** until someone resolves it with `outbox_admin.py` — by design, to keep per-aggregate ordering.
 - **Timing equalisation is tested structurally only:** tests assert that a password verification runs for unknown emails; response times were not measured.
-- The agent, policy engine, refunds, RAG and UI do not exist yet (see Status).
-- No CI, HTTPS/CORS configuration or production deployment setup.
-- Mac/Linux commands are unverified (see Quick start).
+- **Windows specifics:** use `127.0.0.1`, not `localhost` (IPv6 fallback adds ~2 s per connection), and expect a slow first Python start (see Running the tests).
+- No CI, HTTPS/CORS configuration or production deployment setup. Mac/Linux commands are unverified (see Quick start).
 
 ## Repo layout
 
 ```text
-backend/            FastAPI app (app/api, app/core, app/db, app/modules, app/tests), Alembic config
-scripts/seed.py     Demo data
+backend/            FastAPI app, Alembic config
+  app/api/          routers (auth, orders, refunds, approvals, health), deps, middleware
+  app/policy/       policy engine (pure functions) + rules.yaml
+  app/tools/        tool registry, schemas, executor, handlers
+  app/modules/      orders, refunds, tickets, users, audit (service + repo layers)
+  app/events/       outbox writer, relay, consumers, Kafka wrapper, admin helpers
+  app/db/           models, session, locking helpers, migrations (0001, 0002)
+  app/tests/        643 tests (see Running the tests)
+scripts/
+  seed.py, demo_phase2.py, demo_cleanup.py     dev data and the demo (dev only)
+  reconcile_refunds.py, outbox_admin.py, kafka_smoke.py
+  mutation/         mutation runner, five JSON lists, README
 docker-compose.yml  Postgres + pgvector, Redis, Redpanda (bound to 127.0.0.1)
 .env.example        Configuration template
 CLAUDE.md           Project rules and conventions
-docs/               Architecture, design decisions, Phase 0–1 report
+docs/               Architecture, decisions, events, refunds API, phase reports
 ```
 
-See [`docs/architecture.md`](docs/architecture.md), [`docs/decisions.md`](docs/decisions.md) and [`docs/phase-0-1-report.md`](docs/phase-0-1-report.md).
+See [`docs/architecture.md`](docs/architecture.md), [`docs/decisions.md`](docs/decisions.md), [`docs/events.md`](docs/events.md), [`docs/refunds-api.md`](docs/refunds-api.md) and [`docs/phase-0-1-report.md`](docs/phase-0-1-report.md). The Phase 2 report is `docs/phase-2-report.md` (coming in this documentation refresh).
