@@ -32,7 +32,10 @@ def block_to_json(b: Block) -> dict[str, Any]:
     if isinstance(b, TextBlock):
         return {"type": "text", "text": b.text}
     if isinstance(b, ToolUseBlock):
-        return {"type": "tool_use", "id": b.id, "name": b.name, "input": b.input}
+        out: dict[str, Any] = {"type": "tool_use", "id": b.id, "name": b.name, "input": b.input}
+        if b.signature:
+            out["signature"] = b.signature
+        return out
     return {
         "type": "tool_result",
         "tool_use_id": b.tool_use_id,
@@ -45,7 +48,7 @@ def block_from_json(d: dict[str, Any]) -> Block:
     if d["type"] == "text":
         return TextBlock(d["text"])
     if d["type"] == "tool_use":
-        return ToolUseBlock(d["id"], d["name"], d["input"])
+        return ToolUseBlock(d["id"], d["name"], d["input"], d.get("signature"))
     return ToolResultBlock(d["tool_use_id"], d["content"], bool(d.get("is_error", False)))
 
 

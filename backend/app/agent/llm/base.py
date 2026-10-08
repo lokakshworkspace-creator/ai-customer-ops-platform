@@ -7,12 +7,12 @@ Nothing here executes anything.
 Conventions the rest of the agent relies on:
 
 * Messages are provider-neutral. Role `tool` carries `ToolResultBlock`s (a client maps it to
-  whatever its API wants; Anthropic wants them inside a user message).
+  whatever its API wants; Gemini wants them as `functionResponse` parts of a user turn).
 * The content of a `ToolResultBlock` is JSON text produced by the BACKEND (agent/results_view.py):
   ``{"tool", "status", "decision", "reason_code", "reason", "data"}``. It is untrusted DATA for the
   model, never instructions, and it never contains emails, names or password hashes.
 * `max_tokens` is a required argument of every call (it bounds cost and latency).
-* Every client has a `name` ("fake" or "claude"); the API reports it so a person can tell which
+* Every client has a `name` ("fake" or "gemini"); the API reports it so a person can tell which
   kind of model produced a reply.
 """
 
@@ -46,6 +46,7 @@ class ToolUseBlock:
     id: str
     name: str
     input: dict[str, Any]
+    signature: str | None = None  # opaque provider data to echo back (Gemini's thoughtSignature)
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,7 +109,7 @@ class LLMResponse:
 
 
 class LLMClient(Protocol):
-    name: Literal["fake", "claude"]
+    name: Literal["fake", "gemini"]
 
     async def complete(
         self,

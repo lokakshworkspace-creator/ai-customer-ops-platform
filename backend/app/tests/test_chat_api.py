@@ -127,8 +127,8 @@ async def test_a_small_refund_through_http(client, db_session, world) -> None:
 async def test_the_llm_field_names_the_model_kind(client, world, holder) -> None:
     assert (await say_to(client, world.alice, "hello")).json()["llm"] == "fake"
     holder.orchestrator = make_orchestrator(ScriptedLLM(say("hi")))
-    holder.orchestrator.llm.name = "claude"  # what a real ClaudeLLMClient reports
-    assert (await say_to(client, world.alice, "hello")).json()["llm"] == "claude"
+    holder.orchestrator.llm.name = "gemini"  # what a real GeminiLLMClient reports
+    assert (await say_to(client, world.alice, "hello")).json()["llm"] == "gemini"
 
 
 async def test_the_same_message_id_returns_the_stored_response_and_marks_the_replay(
@@ -220,12 +220,12 @@ async def test_without_a_key_outside_dev_the_endpoint_says_503_instead_of_faking
     monkeypatch, world
 ) -> None:
     def no_model():
-        raise LLMConfigError("No LLM is configured: set ANTHROPIC_API_KEY.")
+        raise LLMConfigError("No LLM is configured: set LLM_PROVIDER=gemini ...")
 
     monkeypatch.setattr(deps, "get_llm_client", no_model)
     with pytest.raises(HTTPException) as caught:
         deps.get_llm()
-    assert caught.value.status_code == 503 and "ANTHROPIC_API_KEY" in caught.value.detail
+    assert caught.value.status_code == 503 and "LLM_PROVIDER" in caught.value.detail
 
 
 async def test_too_many_messages_in_an_hour_is_429(client, world, holder) -> None:

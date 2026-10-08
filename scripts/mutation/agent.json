@@ -94,5 +94,53 @@
     "old": "run = await store.get_run(session, workflow_id, user_id)\n    if run is None:",
     "new": "run = await store.get_run(session, workflow_id)\n    if run is None:",
     "tests": "app/tests/test_chat_api.py"
+  },
+  {
+    "id": "G1",
+    "desc": "the Gemini API key is put in the URL (where logs would record it)",
+    "file": "app/agent/llm/gemini.py",
+    "old": "self._url = f\"{base_url}/models/{model}:generateContent\"",
+    "new": "self._url = f\"{base_url}/models/{model}:generateContent?key={api_key.get_secret_value()}\"",
+    "tests": "app/tests/test_agent_llm_client.py"
+  },
+  {
+    "id": "G2",
+    "desc": "a transient Gemini failure is not retried",
+    "file": "app/agent/llm/gemini.py",
+    "old": "for attempt in (1, 2):  # the call, and exactly one retry",
+    "new": "for attempt in (2,):",
+    "tests": "app/tests/test_agent_llm_client.py"
+  },
+  {
+    "id": "G3",
+    "desc": "a bad key / bad request is reported as a transient outage",
+    "file": "app/agent/llm/gemini.py",
+    "old": "raise LLMConfigError(MISCONFIGURED)  # 400 / 401 / 403 / 404: retrying cannot help",
+    "new": "raise LLMUnavailable(UNAVAILABLE)",
+    "tests": "app/tests/test_agent_llm_client.py"
+  },
+  {
+    "id": "G4",
+    "desc": "max_tokens is not sent to Gemini",
+    "file": "app/agent/llm/gemini.py",
+    "old": "\"generationConfig\": {\"maxOutputTokens\": max_tokens},",
+    "new": "\"generationConfig\": {\"maxOutputTokens\": 8192},",
+    "tests": "app/tests/test_agent_llm_client.py"
+  },
+  {
+    "id": "G5",
+    "desc": "the thoughtSignature of a function call is not sent back",
+    "file": "app/agent/llm/gemini.py",
+    "old": "if b.signature:\n                    part[\"thoughtSignature\"] = b.signature",
+    "new": "if False:\n                    part[\"thoughtSignature\"] = b.signature",
+    "tests": "app/tests/test_agent_llm_client.py"
+  },
+  {
+    "id": "G6",
+    "desc": "the Gemini schema mapping lets unsupported keys through (additionalProperties, ...)",
+    "file": "app/agent/tools_view.py",
+    "old": "if key not in GEMINI_KEYS:\n            continue",
+    "new": "if False:\n            continue",
+    "tests": "app/tests/test_agent_tools_view.py"
   }
 ]

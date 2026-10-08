@@ -1,9 +1,18 @@
 """What the LLM is shown: only agent_visible tools, with schemas it can actually satisfy."""
 
 import json
+import os
 import uuid
+from pathlib import Path
 
-from app.agent.tools_view import MONEY_PATTERN, agent_tool_defs
+from app.agent.tools_view import (
+    GEMINI_FORMATS,
+    GEMINI_KEYS,
+    GEMINI_TYPES,
+    MONEY_PATTERN,
+    agent_tool_defs,
+    gemini_declarations,
+)
 from app.policy.rules import get_rules
 from app.tests.policy_helpers import make_rules
 from app.tools.default import build_default_registry
@@ -125,3 +134,67 @@ def test_what_the_schema_promises_the_validator_accepts() -> None:
     )
     CreateTicketInput.model_validate({"subject": "s", "body": "b", "priority": "high"})
     ListOrdersInput.model_validate({"limit": 100})
+
+
+# --- Gemini: the restricted schema subset, with a golden snapshot per tool ----------------------
+
+GOLDEN = Path(__file__).parent / "golden" / "gemini_tools.json"
+
+
+def gemini_by_tool() -> dict:
+    return {d["name"]: d for d in gemini_declarations(list(DEFS.values()))}
+
+
+def test_gemini_golden_snapshot_per_tool() -> None:
+    """The exact function declarations sent to Gemini. A change here is a change to what the model
+    is told, so it must be deliberate: regenerate with UPDATE_GOLDEN=1 and review the diff."""
+    actual = gemini_by_tool()
+    if os.environ.get("UPDATE_GOLDEN") == "1":
+        GOLDEN.write_text(json.dumps(actual, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
+    assert set(actual) == set(golden) == set(DEFS)
+    for name in sorted(actual):
+        assert actual[name] == golden[name], f"{name}: Gemini declaration changed"
+
+
+def check_gemini_schema(node: dict, where: str) -> None:
+    """Every schema node uses only keys from Gemini's documented Schema object."""
+    assert set(node) <= GEMINI_KEYS, (where, set(node) - GEMINI_KEYS)
+    if "type" in node:
+        assert node["type"] in GEMINI_TYPES.values(), (where, node["type"])
+    assert node.get("format") in (None, *GEMINI_FORMATS), where  # uuid is not a Gemini format
+    for name, sub in node.get("properties", {}).items():
+        check_gemini_schema(sub, f"{where}.{name}")
+    if "items" in node:
+        check_gemini_schema(node["items"], f"{where}[]")
+    for i, sub in enumerate(node.get("anyOf", [])):
+        check_gemini_schema(sub, f"{where}|{i}")
+
+
+def test_gemini_schemas_use_only_the_documented_subset() -> None:
+    for name, decl in gemini_by_tool().items():
+        check_gemini_schema(decl["parameters"], name)
+        assert set(decl) == {"name", "description", "parameters"}
+
+
+def test_gemini_keeps_what_matters_and_flags_uuids_in_the_description() -> None:
+    refund = gemini_by_tool()["request_refund"]["parameters"]
+    assert refund["type"] == "OBJECT" and refund["required"] == [
+        "order_id",
+        "amount",
+        "reason_code",
+    ]
+    assert refund["propertyOrdering"] == ["order_id", "amount", "reason_code", "note"]
+    assert refund["properties"]["amount"]["type"] == "STRING"
+    assert refund["properties"]["amount"]["pattern"] == MONEY_PATTERN
+    assert refund["properties"]["reason_code"]["enum"] == sorted(RULES.refund.valid_reasons)
+    assert "format" not in refund["properties"]["order_id"]
+    assert "UUID" in refund["properties"]["order_id"]["description"]  # the hint survives
+    limit = gemini_by_tool()["list_orders"]["parameters"]["properties"]["limit"]
+    assert limit["type"] == "INTEGER" and (limit["minimum"], limit["maximum"]) == (1, 100)
+
+
+def test_gemini_declarations_never_expose_admin_tools_or_identity_fields() -> None:
+    text = json.dumps(gemini_by_tool())
+    for forbidden in ("approve_refund", "reject_refund", "approval_id", "user_id", "idempotency"):
+        assert forbidden not in text

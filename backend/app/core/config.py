@@ -2,6 +2,7 @@ import os
 import re
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -57,10 +58,13 @@ class Settings(BaseSettings):
     # `scripts/reconcile_refunds.py` retries refunds stuck in `processing` for longer than this.
     refund_stuck_after_seconds: int = 300
 
-    # The agent (Phase 3). With no key the chat uses the fake LLM (dev only; see agent/llm/factory).
+    # The agent (Phase 3). `fake` (the default) is a built-in rule-based model for dev and tests;
+    # `gemini` calls the Google Gemini REST API and needs GEMINI_API_KEY and LLM_MODEL (a model
+    # name such as one of Google's "flash-lite" models: deliberately not hard-coded here).
     # The key is a SecretStr: it prints as ********** and must never be logged or committed.
-    anthropic_api_key: SecretStr | None = None
-    anthropic_model: str = "claude-sonnet-5-5"
+    llm_provider: Literal["fake", "gemini"] = "fake"
+    gemini_api_key: SecretStr | None = None
+    llm_model: str | None = None
     llm_timeout_s: float = Field(30.0, gt=0)
     llm_max_tokens: int = Field(1024, ge=1)  # sent on EVERY LLM call
     llm_history_messages: int = Field(20, ge=1)  # at most this many messages are sent to the model
@@ -74,10 +78,10 @@ class Settings(BaseSettings):
     jwt_secret: str = DEV_JWT_SECRET
     jwt_expire_minutes: int = 30
 
-    @field_validator("anthropic_api_key", mode="before")
+    @field_validator("gemini_api_key", "llm_model", mode="before")
     @classmethod
-    def _blank_key_means_no_key(cls, v: object) -> object:
-        """`ANTHROPIC_API_KEY=` (blank, as in .env.example) is "no key", not an empty key."""
+    def _blank_means_unset(cls, v: object) -> object:
+        """`GEMINI_API_KEY=` / `LLM_MODEL=` (blank, as in .env.example) mean "not set"."""
         if v is None or (isinstance(v, str) and not v.strip()):
             return None
         return v.strip() if isinstance(v, str) else v

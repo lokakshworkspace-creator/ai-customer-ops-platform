@@ -198,37 +198,46 @@ async def test_the_fake_only_reads_the_current_turn() -> None:
 # --- settings -----------------------------------------------------------------------------------
 
 
-def test_the_test_session_never_sees_a_real_key() -> None:
-    """conftest blanks ANTHROPIC_API_KEY, so a key in the developer's .env cannot reach a test."""
-    assert get_settings().anthropic_api_key is None
+def test_the_test_session_never_sees_a_real_key_or_provider() -> None:
+    """conftest blanks the provider settings, so a real key in the developer's .env cannot reach
+    a test: every test gets the fake LLM."""
+    s = get_settings()
+    assert (s.llm_provider, s.gemini_api_key, s.llm_model) == ("fake", None, None)
 
 
 @pytest.mark.parametrize("blank", [None, "", "   "])
-def test_a_blank_key_means_no_key(blank) -> None:
-    assert make(anthropic_api_key=blank).anthropic_api_key is None
+def test_a_blank_key_or_model_means_not_set(blank) -> None:
+    s = make(gemini_api_key=blank, llm_model=blank)
+    assert s.gemini_api_key is None and s.llm_model is None
 
 
 def test_the_key_never_shows_up_in_repr_str_or_dumps() -> None:
-    secret = "sk-ant-test-0123456789abcdef"
-    s = make(anthropic_api_key=secret)
-    assert s.anthropic_api_key is not None
-    assert s.anthropic_api_key.get_secret_value() == secret
+    secret = "AIzaSyTEST-0123456789abcdefghijklmnop"
+    s = make(gemini_api_key=secret)
+    assert s.gemini_api_key is not None
+    assert s.gemini_api_key.get_secret_value() == secret
     for text in (
         repr(s),
         str(s),
         s.model_dump_json(),
         str(s.model_dump()),
-        repr(s.anthropic_api_key),
+        repr(s.gemini_api_key),
     ):
         assert secret not in text
 
 
-def test_agent_defaults_and_limits() -> None:
+def test_provider_defaults_and_limits() -> None:
     s = make()
-    assert s.anthropic_model == "claude-sonnet-5-5"
+    assert (s.llm_provider, s.llm_model) == ("fake", None)  # no model name is hard-coded
     assert (s.llm_max_tokens, s.llm_history_messages, s.llm_timeout_s) == (1024, 20, 30.0)
     assert (s.agent_max_tool_calls_per_turn, s.agent_max_tool_calls_per_conversation) == (5, 20)
     assert (s.agent_turns_per_hour, s.agent_max_message_chars) == (30, 2000)
-    for bad in ({"llm_max_tokens": 0}, {"llm_history_messages": 0}, {"llm_timeout_s": 0}):
+    assert make(llm_provider="gemini").llm_provider == "gemini"
+    for bad in (
+        {"llm_provider": "claude"},
+        {"llm_max_tokens": 0},
+        {"llm_history_messages": 0},
+        {"llm_timeout_s": 0},
+    ):
         with pytest.raises(Exception):  # noqa: B017 (pydantic ValidationError)
             make(**bad)

@@ -1,4 +1,4 @@
-"""Fake LLMs: used by ALL tests, and by the app when no ANTHROPIC_API_KEY is set (dev only).
+"""Fake LLMs: used by ALL tests, and by the app when LLM_PROVIDER=fake (the default; dev only).
 
 * `ScriptedLLM`: plays back an exact script. Tests use it to put precise proposals in the model's
   mouth and to inspect what the model was SHOWN (`.calls`: the system prompt, the messages, the

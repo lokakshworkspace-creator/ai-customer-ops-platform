@@ -48,7 +48,7 @@ Send one message to the assistant.
 * `status`: `completed`, `waiting_approval` (a person must approve a refund; poll
   `GET /api/v1/workflows/{workflow_id}`), `escalated` (a limit was hit and a ticket was opened) or
   `failed` (the assistant stopped after part of the request was carried out).
-* `llm` says whether the reply came from the `claude` model or the built-in `fake` one.
+* `llm` says whether the reply came from the `gemini` model or the built-in `fake` one.
 * Errors: `404` conversation not found; `409` the previous message is still being processed (or
   the `message_id` belongs to another conversation); `429` too many messages this hour; `503` the
   assistant is unavailable (nothing was done; the same `message_id` may be sent again).

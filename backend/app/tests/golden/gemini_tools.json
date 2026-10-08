@@ -1,0 +1,158 @@
+{
+  "cancel_order": {
+    "description": "Cancel an unpaid order. Paid orders must be refunded instead.",
+    "name": "cancel_order",
+    "parameters": {
+      "properties": {
+        "order_id": {
+          "description": "The id (UUID) of the unpaid order to cancel.",
+          "type": "STRING"
+        }
+      },
+      "propertyOrdering": [
+        "order_id"
+      ],
+      "required": [
+        "order_id"
+      ],
+      "type": "OBJECT"
+    }
+  },
+  "create_ticket": {
+    "description": "Open a support ticket, optionally about one of the caller's orders.",
+    "name": "create_ticket",
+    "parameters": {
+      "properties": {
+        "body": {
+          "description": "What happened, in the customer's own words.",
+          "maxLength": 5000,
+          "minLength": 1,
+          "type": "STRING"
+        },
+        "order_id": {
+          "description": "The order this is about, if any. Format: UUID.",
+          "type": "STRING"
+        },
+        "priority": {
+          "description": "low, normal or high.",
+          "enum": [
+            "low",
+            "normal",
+            "high"
+          ],
+          "type": "STRING"
+        },
+        "subject": {
+          "description": "A short summary of the problem.",
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "STRING"
+        }
+      },
+      "propertyOrdering": [
+        "subject",
+        "body",
+        "order_id",
+        "priority"
+      ],
+      "required": [
+        "subject",
+        "body"
+      ],
+      "type": "OBJECT"
+    }
+  },
+  "get_order": {
+    "description": "Look up one of the caller's orders by id.",
+    "name": "get_order",
+    "parameters": {
+      "properties": {
+        "order_id": {
+          "description": "The id (UUID) of the order, as returned by list_orders.",
+          "type": "STRING"
+        }
+      },
+      "propertyOrdering": [
+        "order_id"
+      ],
+      "required": [
+        "order_id"
+      ],
+      "type": "OBJECT"
+    }
+  },
+  "list_orders": {
+    "description": "List the caller's orders, newest first.",
+    "name": "list_orders",
+    "parameters": {
+      "properties": {
+        "limit": {
+          "description": "How many orders to return.",
+          "maximum": 100,
+          "minimum": 1,
+          "type": "INTEGER"
+        },
+        "offset": {
+          "description": "How many orders to skip.",
+          "minimum": 0,
+          "type": "INTEGER"
+        }
+      },
+      "propertyOrdering": [
+        "limit",
+        "offset"
+      ],
+      "type": "OBJECT"
+    }
+  },
+  "request_refund": {
+    "description": "Request a refund for one of the caller's orders. Policy decides: small refunds are paid immediately, larger or unusual ones wait for human approval.",
+    "name": "request_refund",
+    "parameters": {
+      "properties": {
+        "amount": {
+          "description": "Amount to refund, in the order's currency. A decimal string such as \"250.00\", never a JSON number.",
+          "pattern": "^[0-9]{1,10}(\\.[0-9]{1,2})?$",
+          "type": "STRING"
+        },
+        "note": {
+          "description": "Optional note, at most 500 characters.",
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "STRING"
+        },
+        "order_id": {
+          "description": "The id (UUID) of the order to refund.",
+          "type": "STRING"
+        },
+        "reason_code": {
+          "description": "Why the customer wants a refund.",
+          "enum": [
+            "changed_mind",
+            "damaged",
+            "defective",
+            "late_delivery",
+            "not_as_described",
+            "not_delivered",
+            "order_cancelled",
+            "other",
+            "wrong_item"
+          ],
+          "type": "STRING"
+        }
+      },
+      "propertyOrdering": [
+        "order_id",
+        "amount",
+        "reason_code",
+        "note"
+      ],
+      "required": [
+        "order_id",
+        "amount",
+        "reason_code"
+      ],
+      "type": "OBJECT"
+    }
+  }
+}

@@ -17,7 +17,7 @@ export type ChatResponse = {
   status: "completed" | "waiting_approval" | "escalated" | "failed" | "running";
   reply: string;
   tool_results: ToolResult[];
-  llm: "fake" | "claude";
+  llm: "fake" | "gemini";
 };
 
 export type WorkflowView = {
@@ -28,7 +28,7 @@ export type WorkflowView = {
   reply: string | null;
   latest_message: string | null;
   tool_results: ToolResult[];
-  llm: "fake" | "claude" | null;
+  llm: "fake" | "gemini" | null;
   waiting_for_approval: boolean;
 };
 

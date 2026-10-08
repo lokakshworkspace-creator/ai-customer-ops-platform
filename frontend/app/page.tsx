@@ -48,10 +48,10 @@ function ToolChip({ r }: { r: ToolResult }) {
   );
 }
 
-function LlmBadge({ llm }: { llm: "fake" | "claude" }) {
+function LlmBadge({ llm }: { llm: "fake" | "gemini" }) {
   return (
     <span
-      title={llm === "fake" ? "Reply from the built-in fake model" : "Reply from the Claude model"}
+      title={llm === "fake" ? "Reply from the built-in fake model" : "Reply from the Gemini model"}
       className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
         llm === "fake" ? "bg-amber-100 text-amber-800" : "bg-indigo-100 text-indigo-800"
       }`}

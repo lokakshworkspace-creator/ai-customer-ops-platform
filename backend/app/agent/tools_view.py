@@ -15,6 +15,7 @@ sees. Identity (`user_id`, `role`) and idempotency keys are not fields of any to
 rejects them (`extra="forbid"`) and the backend derives the key itself.
 """
 
+from collections.abc import Sequence
 from typing import Any
 
 from pydantic import BaseModel
@@ -90,4 +91,64 @@ def agent_tool_defs(registry: ToolRegistry, rules: Rules) -> list[ToolDef]:
     return [
         ToolDef(t.name, t.description, to_llm_schema(t.input_model, rules))
         for t in registry.agent_tools()
+    ]
+
+
+# --- Gemini --------------------------------------------------------------------------------------
+# Gemini's function parameters are NOT arbitrary JSON Schema: they are an OpenAPI-style `Schema`
+# object (https://ai.google.dev/api/caching#Schema) with upper-case types and a fixed set of keys.
+# `additionalProperties`, `$ref`, `title`, `default` and non-standard `format`s are not part of it.
+
+GEMINI_TYPES = {
+    "string": "STRING",
+    "integer": "INTEGER",
+    "number": "NUMBER",
+    "boolean": "BOOLEAN",
+    "array": "ARRAY",
+    "object": "OBJECT",
+}
+GEMINI_KEYS = frozenset(
+    {
+        "type", "format", "description", "nullable", "enum", "items", "properties", "required",
+        "minimum", "maximum", "minItems", "maxItems", "pattern", "minLength", "maxLength",
+        "anyOf", "propertyOrdering",
+    }
+)  # fmt: skip
+GEMINI_FORMATS = frozenset({"enum", "date-time", "int32", "int64", "float", "double"})
+
+
+def to_gemini_schema(node: Any) -> Any:
+    """Our cleaned schema (to_llm_schema) -> the subset Gemini accepts."""
+    if isinstance(node, list):
+        return [to_gemini_schema(x) for x in node]
+    if not isinstance(node, dict):
+        return node
+    out: dict[str, Any] = {}
+    for key, value in node.items():
+        if key not in GEMINI_KEYS:
+            continue  # additionalProperties, default, title, ...
+        if key == "type":
+            out[key] = GEMINI_TYPES.get(value, value)
+        elif key == "properties":
+            out[key] = {name: to_gemini_schema(sub) for name, sub in value.items()}
+        elif key == "format" and value not in GEMINI_FORMATS:
+            continue  # e.g. "uuid": unsupported, so only a hint in the description is kept
+        else:
+            out[key] = to_gemini_schema(value)
+    if node.get("format") == "uuid" and "UUID" not in out.get("description", ""):
+        out["description"] = (out.get("description", "") + " Format: UUID.").strip()
+    if "properties" in out:
+        out["propertyOrdering"] = list(out["properties"])
+    return out
+
+
+def gemini_declarations(defs: Sequence[ToolDef]) -> list[dict[str, Any]]:
+    """The `functionDeclarations` array of a Gemini request, one entry per tool."""
+    return [
+        {
+            "name": d.name,
+            "description": d.description,
+            "parameters": to_gemini_schema(d.input_schema),
+        }
+        for d in defs
     ]

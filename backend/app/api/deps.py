@@ -110,8 +110,8 @@ def get_executor() -> ToolExecutor:
 
 
 def get_llm() -> LLMClient:
-    """The process-wide LLM client (Claude with a key, the fake in dev without one). Without a
-    key outside dev there is no model: answer 503 rather than pretending."""
+    """The process-wide LLM client: Gemini when LLM_PROVIDER=gemini, the fake in dev otherwise.
+    Without a configured model outside dev there is none: answer 503 rather than pretending."""
     try:
         return get_llm_client()
     except LLMConfigError as exc:
