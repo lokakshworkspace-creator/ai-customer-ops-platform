@@ -284,4 +284,4 @@ CLAUDE.md           Project rules and conventions
 docs/               Architecture, decisions, events, refunds API, phase reports
 ```
 
-See [`docs/architecture.md`](docs/architecture.md), [`docs/decisions.md`](docs/decisions.md), [`docs/events.md`](docs/events.md), [`docs/refunds-api.md`](docs/refunds-api.md) and [`docs/phase-0-1-report.md`](docs/phase-0-1-report.md). The Phase 2 report is `docs/phase-2-report.md` (coming in this documentation refresh).
+See [`docs/architecture.md`](docs/architecture.md), [`docs/decisions.md`](docs/decisions.md), [`docs/events.md`](docs/events.md), [`docs/refunds-api.md`](docs/refunds-api.md), [`docs/phase-0-1-report.md`](docs/phase-0-1-report.md) and [`docs/phase-2-report.md`](docs/phase-2-report.md).
