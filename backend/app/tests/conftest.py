@@ -219,3 +219,14 @@ async def kafka_env() -> AsyncIterator["KafkaEnv"]:
         yield env
     finally:
         await delete_env(env)
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Mark every test that needs the real Redpanda, so `pytest -m "not kafka"` is the fast suite.
+
+    A test needs Redpanda exactly when it uses the `kafka_env` fixture (directly or through
+    another fixture), so the marker is derived from that rather than remembered by hand.
+    """
+    for item in items:
+        if "kafka_env" in getattr(item, "fixturenames", ()):
+            item.add_marker(pytest.mark.kafka)

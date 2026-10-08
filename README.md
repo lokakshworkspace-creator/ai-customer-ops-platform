@@ -79,6 +79,18 @@ The commands were run on Windows (the shell-agnostic ones — `docker compose`, 
 
 The tests need Postgres running. They create and rebuild a separate database called `ops_test` through the real Alembic migration and never touch the dev database `ops`.
 
+### Running the tests: the `kafka` marker
+
+Tests that talk to the real Redpanda (the outbox relay, the consumer, the end-to-end event flow) carry the pytest marker `kafka`. It is applied automatically to every test that uses the `kafka_env` fixture, and markers are strict, so a typo is an error. Run from `backend/` (timings measured on the development machine, Windows, warm caches):
+
+```powershell
+.\.venv\Scripts\python -m pytest                      # everything: 603 passed, 1 skipped, about 3.5 min
+.\.venv\Scripts\python -m pytest -m "not kafka"       # fast suite, needs Postgres only: 576 passed, about 1.5 min
+.\.venv\Scripts\python -m pytest -m kafka             # only the Redpanda-backed tests: 27 passed, 1 skipped, about 2 min
+```
+
+The fast suite was verified to pass with the Redpanda container stopped. The one skipped test sends `SIGTERM` to a child process and only runs on POSIX. The very first Python start after the machine has been idle can take around 10 s for the imports alone (the virtualenv's ~4,800 files are read cold), so a first run may look much slower than the numbers above.
+
 ### Seeded logins (local development only)
 
 All passwords are `password123` (override with the `SEED_PASSWORD` environment variable when seeding).

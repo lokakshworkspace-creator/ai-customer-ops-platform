@@ -10,6 +10,7 @@ retry, or write only to the database.
 
 import argparse
 import asyncio
+import sys
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +21,7 @@ from app.db.session import get_engine, get_sessionmaker
 from app.events.consumers.base import ConsumerConfig, EventConsumer
 from app.events.envelope import EventEnvelope
 from app.events.kafka import KafkaEventProducer, ensure_topics
-from app.events.runtime import install_signal_handlers
+from app.events.runtime import DeadlineExceeded, install_signal_handlers, run_with_deadline
 from app.events.types import dead_letter_topic, event_topics
 
 log = structlog.get_logger(__name__)
@@ -80,17 +81,39 @@ async def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Notification consumer (logs what it would send).")
     ap.add_argument("--once", action="store_true", help="drain the backlog, then exit")
     ap.add_argument("--idle-polls", type=int, default=2, help="with --once: empty polls = drained")
+    ap.add_argument(
+        "--deadline",
+        type=float,
+        default=settings.once_deadline_s,
+        help="with --once: give up after this many seconds and exit 3, naming what it was "
+        f"waiting on (default {settings.once_deadline_s:g}, ONCE_DEADLINE_S; 0 = no limit)",
+    )
     args = ap.parse_args(argv)
     configure_logging(settings.log_level, json_logs=settings.is_prod)
 
     consumer = build_consumer(settings)
     restore = install_signal_handlers(consumer.stop)
-    try:
+
+    async def work() -> None:
         topics = {t: 3 for t in event_topics(settings.kafka_topic_prefix)}
         topics[dead_letter_topic(settings.kafka_topic_prefix)] = 1
+        consumer.phase.set("checking/creating the topics on Redpanda (topic metadata)")
         await ensure_topics(settings.kafka_bootstrap_servers, topics)
         log.info("consumer_started", once=args.once, group=consumer.cfg.group_id)
         await consumer.run(once=args.once, idle_polls=args.idle_polls)
+
+    try:
+        if args.once:
+            try:
+                await run_with_deadline(work(), args.deadline, consumer.phase, "consumer --once")
+            except DeadlineExceeded as exc:
+                log.error(
+                    "consumer_deadline_exceeded", waiting_on=exc.waiting_on, seconds=exc.seconds
+                )
+                print(f"consumer: {exc}", file=sys.stderr)
+                return 3
+        else:
+            await work()
         log.info("consumer_stopped")
         return 0
     finally:

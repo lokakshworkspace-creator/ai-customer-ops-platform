@@ -73,8 +73,8 @@ class KafkaEventProducer:
 async def ensure_topics(bootstrap: str, topics: dict[str, int]) -> None:
     """Create topics (name -> partition count) if they do not exist. Idempotent."""
     admin = AIOKafkaAdminClient(bootstrap_servers=bootstrap)
-    await admin.start()
     try:
+        await admin.start()
         for name, partitions in topics.items():
             try:
                 await admin.create_topics(

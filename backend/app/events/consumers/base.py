@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.db.models import ProcessedEvent
 from app.events.envelope import EventEnvelope, PoisonMessage, parse_envelope
 from app.events.kafka import KafkaEventProducer
-from app.events.runtime import sleep_or_stop
+from app.events.runtime import Phase, sleep_or_stop
 
 log = structlog.get_logger(__name__)
 
@@ -61,20 +61,26 @@ class EventConsumer:
         self._dlq = dlq_producer
         self._consumer: AIOKafkaConsumer | None = None
         self.stop = asyncio.Event()
+        self.phase = Phase("idle")  # what the consumer is doing now (named in --once timeouts)
 
     # -- one message ---------------------------------------------------------------------------
 
     async def process_message(self, msg: ConsumerRecord) -> str:
         """Returns 'processed' | 'duplicate' | 'dead_lettered'. Raises only for infrastructure
         problems (database or broker down) that the caller should retry."""
+        where = f"{msg.topic}[{msg.partition}] offset {msg.offset}"
+        self.phase.set(f"parsing the message at {where}")
         try:
             envelope = parse_envelope(msg.value)
         except PoisonMessage as poison:
+            self.phase.set(f"dead-lettering the message at {where} (producing to the DLQ topic)")
             await self._dead_letter(msg, poison.reason, poison.detail)
             await self._commit_offset(msg)
             return "dead_lettered"
 
+        self.phase.set(f"applying the effect of the message at {where} (database transaction)")
         outcome = await self._apply_effect(envelope, msg)
+        self.phase.set(f"committing the Kafka offset for {where}")
         await self._commit_offset(msg)  # only after the effect's transaction committed
         return outcome
 
@@ -154,11 +160,16 @@ class EventConsumer:
             auto_offset_reset="earliest",
         )
         self._consumer = consumer
+        self.phase.set(
+            f"starting the Kafka consumer and joining group '{self.cfg.group_id}' (group join)"
+        )
         await consumer.start()
+        self.phase.set("starting the dead-letter producer")
         await self._dlq.start()
         try:
             empty_polls = 0
             while not self.stop.is_set():
+                self.phase.set(f"polling {', '.join(self.cfg.topics)} for messages")
                 batches = await consumer.getmany(
                     timeout_ms=self.cfg.poll_timeout_ms, max_records=100
                 )

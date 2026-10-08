@@ -94,5 +94,21 @@
     "old": "\"UPDATE outbox_events SET parked_at = NULL, attempts = 0, next_attempt_at = now() \"",
     "new": "\"UPDATE outbox_events SET parked_at = NULL, next_attempt_at = now() \"",
     "tests": "app/tests/test_outbox_admin.py"
+  },
+  {
+    "id": "E13",
+    "desc": "extra: the --once deadline never fires (a hang stays a hang)",
+    "file": "app/events/runtime.py",
+    "old": "    deadline = asyncio.timeout(seconds)\n",
+    "new": "    deadline = asyncio.timeout(None)\n",
+    "tests": "app/tests/test_once_deadline.py"
+  },
+  {
+    "id": "E14",
+    "desc": "extra: the kafka marker is not applied automatically",
+    "file": "app/tests/conftest.py",
+    "old": "        if \"kafka_env\" in getattr(item, \"fixturenames\", ()):\n",
+    "new": "        if False:\n",
+    "tests": "app/tests/test_pytest_markers.py"
   }
 ]

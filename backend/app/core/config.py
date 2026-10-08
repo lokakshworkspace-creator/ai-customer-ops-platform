@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     outbox_max_attempts: int = 10
     outbox_backoff_base_s: float = 1.0  # delay after the 1st failure; doubles each time
     outbox_backoff_max_s: float = 300.0
+    # `relay --once` / `consumer --once` give up after this many seconds (0 = no limit) and exit 3
+    # naming what they were waiting on, instead of hanging.
+    once_deadline_s: float = 120.0
     consumer_group: str = "notifications"
     consumer_poll_timeout_ms: int = 1000
     consumer_max_handler_attempts: int = 5

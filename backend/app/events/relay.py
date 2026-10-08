@@ -21,6 +21,7 @@ Guarantees (see docs/events.md):
 
 import argparse
 import asyncio
+import sys
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -33,7 +34,13 @@ from app.core.logging import configure_logging
 from app.db.session import get_engine, get_sessionmaker
 from app.events.envelope import envelope_from_row
 from app.events.kafka import KafkaEventProducer, ensure_topics
-from app.events.runtime import install_signal_handlers, sleep_or_stop
+from app.events.runtime import (
+    DeadlineExceeded,
+    Phase,
+    install_signal_handlers,
+    run_with_deadline,
+    sleep_or_stop,
+)
 from app.events.types import ENVELOPE_VERSION, event_topics, topic_for
 
 log = structlog.get_logger(__name__)
@@ -119,10 +126,12 @@ class Relay:
         self.max_attempts = max_attempts
         self.backoff_base_s = backoff_base_s
         self.backoff_max_s = backoff_max_s
+        self.phase = Phase("idle")  # what the relay is doing now (named in --once timeouts)
 
     async def run_once(self) -> RelayStats:
         """Claim one batch, publish it, record the outcome, commit. One transaction."""
         stats = RelayStats()
+        self.phase.set("claiming due events from the outbox (database)")
         async with self.maker() as session:
             rows = list(
                 (await session.execute(SELECT_DUE, {"batch": self.batch_size})).mappings().all()
@@ -131,14 +140,19 @@ class Relay:
             if not rows:
                 return stats  # idle: nothing claimed, the broker is never contacted
 
+            self.phase.set("connecting the Kafka producer to Redpanda")
             try:
                 await self.producer.start()
             except Exception as exc:  # broker unreachable: every claimed row has failed
                 outcomes: dict[Any, Exception | None] = {row["id"]: exc for row in rows}
             else:
+                self.phase.set(
+                    f"publishing {len(rows)} event(s) and waiting for the broker's acknowledgement"
+                )
                 results = await asyncio.gather(*[self._publish_one(row) for row in rows])
                 outcomes = {row["id"]: err for row, err in zip(rows, results, strict=True)}
 
+            self.phase.set("recording the publish results (database)")
             for row in rows:
                 error = outcomes[row["id"]]
                 if error is None:
@@ -147,6 +161,7 @@ class Relay:
                 else:
                     await self._record_failure(session, row, error, stats)
             await session.commit()
+        self.phase.set("idle")
         return stats
 
     async def _publish_one(self, row: Any) -> Exception | None:
@@ -233,6 +248,13 @@ async def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--once", action="store_true", help="publish what is due, then exit")
     ap.add_argument("--batch-size", type=int, default=settings.outbox_batch_size)
     ap.add_argument("--poll-interval", type=float, default=settings.outbox_poll_interval_s)
+    ap.add_argument(
+        "--deadline",
+        type=float,
+        default=settings.once_deadline_s,
+        help="with --once: give up after this many seconds and exit 3, naming what it was "
+        f"waiting on (default {settings.once_deadline_s:g}, ONCE_DEADLINE_S; 0 = no limit)",
+    )
     args = ap.parse_args(argv)
     configure_logging(settings.log_level, json_logs=settings.is_prod)
 
@@ -253,7 +275,9 @@ async def main(argv: list[str] | None = None) -> int:
     )
     stop = asyncio.Event()
     restore = install_signal_handlers(stop)
-    try:
+
+    async def prepare_topics() -> None:
+        relay.phase.set("checking/creating the topics on Redpanda (topic metadata)")
         try:
             await ensure_topics(
                 settings.kafka_bootstrap_servers,
@@ -261,11 +285,24 @@ async def main(argv: list[str] | None = None) -> int:
             )
         except Exception as exc:  # the broker may be down; publishing will back off and retry
             log.warning("ensure_topics_failed", error=f"{type(exc).__name__}: {exc}"[:200])
-        log.info("relay_started", once=args.once, prefix=settings.kafka_topic_prefix)
+
+    async def once() -> RelayStats:
+        await prepare_topics()
+        log.info("relay_started", once=True, prefix=settings.kafka_topic_prefix)
+        return await relay.drain(stop)
+
+    try:
         if args.once:
-            stats = await relay.drain(stop)
+            try:
+                stats = await run_with_deadline(once(), args.deadline, relay.phase, "relay --once")
+            except DeadlineExceeded as exc:
+                log.error("relay_deadline_exceeded", waiting_on=exc.waiting_on, seconds=exc.seconds)
+                print(f"relay: {exc}", file=sys.stderr)
+                return 3
             log.info("relay_finished", **{k: getattr(stats, k) for k in stats.__slots__})
         else:
+            await prepare_topics()
+            log.info("relay_started", once=False, prefix=settings.kafka_topic_prefix)
             await relay.run_forever(stop, args.poll_interval)
         log.info("relay_stopped")
         return 0

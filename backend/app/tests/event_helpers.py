@@ -223,6 +223,18 @@ class UnreachableProducer:
         raise AssertionError("publish must not be reached when start() failed")
 
 
+class HangingProducer:
+    """start() never returns: a broker that accepts the connection and never answers."""
+
+    async def start(self) -> None:
+        await asyncio.Event().wait()
+
+    async def stop(self) -> None: ...
+
+    async def publish(self, *a: Any, **kw: Any) -> None:  # pragma: no cover
+        raise AssertionError("not reached")
+
+
 class GatedProducer:
     """Wraps a producer; the first `hold` publishes wait until `release()` is called. Lets a test
     freeze a relay in the middle of a batch while it holds its row locks."""
