@@ -51,6 +51,13 @@ class WorkflowStatus(StrEnum):
     waiting_approval = "waiting_approval"
     completed = "completed"
     failed = "failed"
+    escalated = "escalated"  # the agent hit a limit; a person has to take over
+
+
+class MessageRole(StrEnum):
+    user = "user"
+    assistant = "assistant"
+    tool = "tool"  # tool results (sent to the model inside a user message)
 
 
 class ApprovalStatus(StrEnum):

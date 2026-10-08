@@ -43,7 +43,7 @@ async def test_all_model_tables_exist(db_session: AsyncSession) -> None:
     )
     existing = set(rows)
     assert set(Base.metadata.tables) <= existing
-    assert len(Base.metadata.tables) == 12
+    assert len(Base.metadata.tables) == 13
 
 
 async def test_migration_matches_models(engine: AsyncEngine) -> None:
