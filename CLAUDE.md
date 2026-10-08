@@ -41,4 +41,4 @@ ALLOW | REQUIRE_APPROVAL | DENY, always with a reason (written to audit_logs).
 0 Foundation · 1 Core domain + auth · 2 Tools + policy + refunds (+ outbox relay/consumers)
 3 Agent + LLM + first UI · 4 RAG · 5 Human approval + events · 6 Resilience, observability, evals · 7 Polish
 
-## Current phase: Phase 2 in progress (tools, policy, refunds, outbox). Phases 0-1 done.
+## Current phase: Phases 0-2 done. Next: Phase 3 (agent)
