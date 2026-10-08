@@ -7,6 +7,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.llm.base import LLMClient, LLMConfigError
+from app.agent.llm.factory import get_llm_client
+from app.agent.orchestrator import Orchestrator
 from app.core.config import get_settings
 from app.core.security import InvalidTokenError, decode_access_token
 from app.db.models import User
@@ -20,6 +23,8 @@ from app.tools.executor import ToolExecutor
 __all__ = [
     "CurrentUser",
     "get_executor",
+    "get_llm",
+    "get_orchestrator",
     "close_redis",
     "get_current_user",
     "get_redis",
@@ -102,3 +107,19 @@ def _executor() -> ToolExecutor:
 def get_executor() -> ToolExecutor:
     """The process-wide tool executor (registry + payment provider). Tests override this."""
     return _executor()
+
+
+def get_llm() -> LLMClient:
+    """The process-wide LLM client (Claude with a key, the fake in dev without one). Without a
+    key outside dev there is no model: answer 503 rather than pretending."""
+    try:
+        return get_llm_client()
+    except LLMConfigError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from None
+
+
+def get_orchestrator(
+    executor: Annotated[ToolExecutor, Depends(get_executor)],
+    llm: Annotated[LLMClient, Depends(get_llm)],
+) -> Orchestrator:
+    return Orchestrator(executor, llm, get_settings())

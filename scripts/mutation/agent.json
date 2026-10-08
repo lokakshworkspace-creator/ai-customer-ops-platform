@@ -5,7 +5,7 @@
     "file": "app/tools/executor.py",
     "old": "if spec is not None and ctx.origin == \"agent\" and not spec.agent_visible:",
     "new": "if spec is not None and False and not spec.agent_visible:",
-    "tests": "app/tests/test_tool_executor.py"
+    "tests": "app/tests/test_tool_executor.py app/tests/test_agent_injection.py"
   },
   {
     "id": "A2",
@@ -13,7 +13,7 @@
     "file": "app/agent/tools_view.py",
     "old": "for t in registry.agent_tools()",
     "new": "for t in registry.all()",
-    "tests": "app/tests/test_agent_tools_view.py"
+    "tests": "app/tests/test_agent_tools_view.py app/tests/test_agent_injection.py"
   },
   {
     "id": "A3",
@@ -86,5 +86,13 @@
     "old": "if run is None or run.status != WorkflowStatus.waiting_approval:",
     "new": "if run is None:",
     "tests": "app/tests/test_agent_orchestrator.py"
+  },
+  {
+    "id": "A12",
+    "desc": "GET /workflows/{id} is not owner-scoped (anyone can read anyone's turn)",
+    "file": "app/api/routers/workflows.py",
+    "old": "run = await store.get_run(session, workflow_id, user_id)\n    if run is None:",
+    "new": "run = await store.get_run(session, workflow_id)\n    if run is None:",
+    "tests": "app/tests/test_chat_api.py"
   }
 ]

@@ -6,7 +6,7 @@ from fastapi import FastAPI
 
 from app.api.deps import close_redis
 from app.api.middleware import RequestIDMiddleware
-from app.api.routers import approvals, auth, health, orders, refunds
+from app.api.routers import approvals, auth, chat, health, orders, refunds, workflows
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.session import get_engine
@@ -34,6 +34,8 @@ def create_app() -> FastAPI:
     app.include_router(orders.router)
     app.include_router(refunds.router)
     app.include_router(approvals.router)
+    app.include_router(chat.router)
+    app.include_router(workflows.router)
     return app
 
 
