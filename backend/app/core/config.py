@@ -3,7 +3,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # .env lives at the repo root, one level above backend/
@@ -57,9 +57,30 @@ class Settings(BaseSettings):
     # `scripts/reconcile_refunds.py` retries refunds stuck in `processing` for longer than this.
     refund_stuck_after_seconds: int = 300
 
+    # The agent (Phase 3). With no key the chat uses the fake LLM (dev only; see agent/llm/factory).
+    # The key is a SecretStr: it prints as ********** and must never be logged or committed.
+    anthropic_api_key: SecretStr | None = None
+    anthropic_model: str = "claude-sonnet-5-5"
+    llm_timeout_s: float = Field(30.0, gt=0)
+    llm_max_tokens: int = Field(1024, ge=1)  # sent on EVERY LLM call
+    llm_history_messages: int = Field(20, ge=1)  # at most this many messages are sent to the model
+    agent_max_tool_calls_per_turn: int = Field(5, ge=1)
+    agent_max_tool_calls_per_conversation: int = Field(20, ge=1)
+    agent_turn_deadline_s: float = Field(90.0, gt=0)  # one chat turn, all LLM and tool calls
+    agent_turns_per_hour: int = Field(30, ge=1)  # per user: each turn costs real LLM money
+    agent_max_message_chars: int = Field(2000, ge=1)
+
     # HS256 is pinned in app.core.security (not configurable).
     jwt_secret: str = DEV_JWT_SECRET
     jwt_expire_minutes: int = 30
+
+    @field_validator("anthropic_api_key", mode="before")
+    @classmethod
+    def _blank_key_means_no_key(cls, v: object) -> object:
+        """`ANTHROPIC_API_KEY=` (blank, as in .env.example) is "no key", not an empty key."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        return v.strip() if isinstance(v, str) else v
 
     @model_validator(mode="after")
     def _require_strong_jwt_secret_outside_dev(self) -> "Settings":

@@ -1,4 +1,5 @@
 import asyncio
+import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,11 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+
+# The developer will put a real ANTHROPIC_API_KEY in .env. Tests must NEVER use it: a process
+# environment variable beats .env in pydantic-settings, and a blank value means "no key", so every
+# test (and every subprocess a test starts) gets the fake LLM. Done before Settings can be built.
+os.environ["ANTHROPIC_API_KEY"] = ""
 
 from app.api.deps import get_executor, get_session
 from app.core.config import get_settings
