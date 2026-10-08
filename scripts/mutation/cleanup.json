@@ -1,0 +1,82 @@
+[
+  {
+    "id": "C1",
+    "desc": "prefix match without the hyphen (demo2-, demo@ ... would be deleted)",
+    "file": "../scripts/demo_cleanup.py",
+    "old": "DEMO_PREFIX = \"demo-\"",
+    "new": "DEMO_PREFIX = \"demo\"",
+    "tests": "app/tests/test_demo_cleanup.py"
+  },
+  {
+    "id": "C2",
+    "desc": "the dry run deletes",
+    "file": "../scripts/demo_cleanup.py",
+    "old": "if apply:\n                    counts",
+    "new": "if True:\n                    counts",
+    "tests": "app/tests/test_demo_cleanup.py"
+  },
+  {
+    "id": "C3",
+    "desc": "no check for demo rows entangled with real data",
+    "file": "../scripts/demo_cleanup.py",
+    "old": "    await check_not_entangled(s, p)\n",
+    "new": "",
+    "tests": "app/tests/test_demo_cleanup.py"
+  },
+  {
+    "id": "C4",
+    "desc": "outbox events are not deleted",
+    "file": "../scripts/demo_cleanup.py",
+    "old": "        (\"outbox_events\", OutboxEvent.__table__, _in(OutboxEvent.id, p.outbox_ids)),\n",
+    "new": "",
+    "tests": "app/tests/test_demo_cleanup.py"
+  },
+  {
+    "id": "C5",
+    "desc": "audit rows are selected by actor only (rows about demo data survive)",
+    "file": "../scripts/demo_cleanup.py",
+    "old": "or_(_in(AuditLog.actor_user_id, p.user_ids), _in(AuditLog.resource_id, ids))",
+    "new": "_in(AuditLog.actor_user_id, p.user_ids)",
+    "tests": "app/tests/test_demo_cleanup.py"
+  },
+  {
+    "id": "C6",
+    "desc": "refunds are selected by requester only (a real admin's refund of a demo order survives)",
+    "file": "../scripts/demo_cleanup.py",
+    "old": "            _in(Refund.order_id, p.order_ids),\n            _in(Refund.payment_id, p.payment_ids),\n",
+    "new": "",
+    "tests": "app/tests/test_demo_cleanup.py"
+  },
+  {
+    "id": "C7",
+    "desc": "demo_cleanup runs outside dev",
+    "file": "../scripts/demo_cleanup.py",
+    "old": "    if refusal:\n",
+    "new": "    if False:\n",
+    "tests": "app/tests/test_demo_cleanup.py"
+  },
+  {
+    "id": "C8",
+    "desc": "the deletes are not one transaction",
+    "file": "../scripts/demo_cleanup.py",
+    "old": "        async with s.begin():\n",
+    "new": "        if True:\n",
+    "tests": "app/tests/test_demo_cleanup.py"
+  },
+  {
+    "id": "D1",
+    "desc": "demo_phase2 runs outside dev",
+    "file": "../scripts/demo_phase2.py",
+    "old": "    if refusal:\n",
+    "new": "    if False:\n",
+    "tests": "app/tests/test_dev_only_scripts.py"
+  },
+  {
+    "id": "D2",
+    "desc": "dev_only_refusal allows every environment",
+    "file": "app/core/config.py",
+    "old": "    if env == \"dev\":\n        return None\n",
+    "new": "    if True:\n        return None\n",
+    "tests": "app/tests/test_dev_only_scripts.py"
+  }
+]

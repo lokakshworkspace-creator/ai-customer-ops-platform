@@ -22,7 +22,7 @@ def norm(text: str) -> str:
 
 
 def test_there_are_mutation_lists() -> None:
-    assert {p.stem for p in LISTS} >= {"commit3", "commit4"}
+    assert {p.stem for p in LISTS} >= {"commit2", "commit3", "commit4", "commit5", "cleanup"}
 
 
 @pytest.mark.parametrize("path", LISTS, ids=lambda p: p.stem)
@@ -62,3 +62,5 @@ def test_the_runner_lists_without_running_anything() -> None:
     )
     assert out.returncode == 0
     assert "commit4:" in out.stdout and "R1" in out.stdout
+    assert "commit2:" in out.stdout and "P1" in out.stdout
+    assert "cleanup:" in out.stdout and "C1" in out.stdout

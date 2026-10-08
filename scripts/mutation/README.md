@@ -19,6 +19,8 @@ From the repo root, with the backend dependencies installed (see the main README
 ```text
 python scripts/mutation/run.py --list                  # lists and mutation ids
 python scripts/mutation/run.py commit4                 # the whole commit-4 list
+python scripts/mutation/run.py commit2                 # policy engine (fast: no database)
+python scripts/mutation/run.py cleanup                 # the dev-only scripts
 python scripts/mutation/run.py commit4 --only R1,R2    # selected mutations
 python scripts/mutation/run.py commit5 --timeout 400   # Kafka-backed suites are slower
 ```
@@ -43,11 +45,19 @@ failure, and the first failing test is printed so you can see it failed for the 
 
 ## The lists
 
-| File | Covers |
-|---|---|
-| `commit3.json` | Tool executor pipeline: policy gate, authorization, logging of denied calls, argument size caps, rollback on failure, agent visibility of admin tools, owner scoping |
-| `commit4.json` | Refunds: unique constraint, order and customer locks, `request_hash`, policy gate, provider idempotency key, outbox atomicity, provider call outside a transaction, canonical hashing, velocity statuses, reconcile re-check, self-approval |
-| `commit5.json` | Outbox relay and consumer: marking published only after the broker acknowledges, `SKIP LOCKED`, per-aggregate ordering, backoff and parking, producer durability settings, offset-commit order, consumer de-duplication, poison-message handling, no publishing from request handlers, the event field allow-list |
+Counts are the number of entries in each file (`python scripts/mutation/run.py --list` prints them).
+
+| File | Mutations | Covers |
+|---|---:|---|
+| `commit2.json` | 8 | Policy engine: the 500.00 auto-approve boundary, the 30-day order age, the velocity limit counted off by one, limits hard-coded instead of read from `rules.yaml`, the already-refunded amount, DENY precedence, self-approval |
+| `commit3.json` | 10 | Tool executor pipeline: policy gate, authorization, logging of denied calls, argument size caps, rollback on failure, agent visibility of admin tools, owner scoping |
+| `commit4.json` | 14 | Refunds: unique constraint, order and customer locks, `request_hash`, policy gate, provider idempotency key, outbox atomicity, provider call outside a transaction, canonical hashing, velocity statuses, reconcile re-check, self-approval |
+| `commit5.json` | 14 | Outbox relay and consumer: marking published only after the broker acknowledges, `SKIP LOCKED`, per-aggregate ordering, backoff and parking, producer durability settings, offset-commit order, consumer de-duplication, poison-message handling, no publishing from request handlers, the event field allow-list, the `--once` deadline, the `kafka` marker hook |
+| `cleanup.json` | 10 | The dev-only scripts: `demo_cleanup.py` (the `demo-` prefix, dry run really is a dry run, entanglement check, which rows are selected, one transaction, refusal outside dev) and the same refusal in `demo_phase2.py` and its shared helper |
+| **Total** | **56** | The four numbered lists (`commit2` to `commit5`) are 46 of these; `cleanup` adds 10. |
+
+Phase 0-1 mutation checks (authorization, tokens, login) were run by hand before this tool existed
+and are described in `docs/phase-0-1-report.md`; they are not in these lists.
 
 `tests/test_mutation_lists.py` runs in the normal suite and checks that every pattern in every list
 still occurs **exactly once** in its file, so the lists cannot silently rot when code is refactored.

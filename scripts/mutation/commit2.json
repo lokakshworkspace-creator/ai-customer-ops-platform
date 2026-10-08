@@ -1,0 +1,66 @@
+[
+  {
+    "id": "P1",
+    "desc": "auto-approve limit: > becomes >= (500.00 itself would need approval)",
+    "file": "app/policy/engine.py",
+    "old": "        if facts.amount > r.auto_approve_max:\n",
+    "new": "        if facts.amount >= r.auto_approve_max:\n",
+    "tests": "app/tests/test_policy_engine.py"
+  },
+  {
+    "id": "P2",
+    "desc": "order age limit: > becomes >= (a 30-day-old order is refused)",
+    "file": "app/policy/engine.py",
+    "old": "    if age > timedelta(days=r.max_order_age_days):\n",
+    "new": "    if age >= timedelta(days=r.max_order_age_days):\n",
+    "tests": "app/tests/test_policy_engine.py"
+  },
+  {
+    "id": "P3",
+    "desc": "velocity off by one (the refund being requested is not counted)",
+    "file": "app/policy/engine.py",
+    "old": "        if facts.recent_refund_count + 1 > r.velocity_max_refunds:\n",
+    "new": "        if facts.recent_refund_count > r.velocity_max_refunds:\n",
+    "tests": "app/tests/test_policy_engine.py"
+  },
+  {
+    "id": "P4",
+    "desc": "auto-approve limit hard-coded to 500 (rules.yaml ignored)",
+    "file": "app/policy/engine.py",
+    "old": "        if facts.amount > r.auto_approve_max:\n",
+    "new": "        if facts.amount > Decimal(\"500\"):\n",
+    "tests": "app/tests/test_policy_engine.py"
+  },
+  {
+    "id": "P5",
+    "desc": "order age limit hard-coded to 30 days (rules.yaml ignored)",
+    "file": "app/policy/engine.py",
+    "old": "    if age > timedelta(days=r.max_order_age_days):\n",
+    "new": "    if age > timedelta(days=30):\n",
+    "tests": "app/tests/test_policy_engine.py"
+  },
+  {
+    "id": "P6",
+    "desc": "the amount already refunded on the order is ignored",
+    "file": "app/policy/engine.py",
+    "old": "    elif facts.amount > remaining:\n",
+    "new": "    elif False:\n",
+    "tests": "app/tests/test_policy_engine.py"
+  },
+  {
+    "id": "P7",
+    "desc": "DENY no longer beats REQUIRE_APPROVAL and ALLOW (deny findings are not returned)",
+    "file": "app/policy/engine.py",
+    "old": "    if denies:\n        return _result(PolicyDecision.DENY, denies, **ctx)\n",
+    "new": "    if denies and False:\n        return _result(PolicyDecision.DENY, denies, **ctx)\n",
+    "tests": "app/tests/test_policy_engine.py"
+  },
+  {
+    "id": "P8",
+    "desc": "no separation of duties: the requester may approve their own refund",
+    "file": "app/policy/engine.py",
+    "old": "        and requested_by == actor.id\n",
+    "new": "        and False\n",
+    "tests": "app/tests/test_policy_engine.py"
+  }
+]
