@@ -100,9 +100,16 @@ def test_a_default_per_test_timeout_is_configured(pytestconfig) -> None:
 
 
 def test_a_hanging_test_is_stopped_by_the_timeout_instead_of_hanging(tmp_path) -> None:
-    (tmp_path / "test_hang.py").write_text(
-        "import time\n\ndef test_hangs():\n    time.sleep(120)\n", encoding="utf-8"
+    """What pytest-timeout does depends on the platform. On Windows it can only use the `thread`
+    method: it prints the stack of every thread and ends the WHOLE pytest process (exit code 1)
+    at the hanging test. That test is not reported as FAILED, there is no summary line, and the
+    tests after it never run. (On POSIX the `signal` method fails only the hanging test and the
+    run continues.) The README says exactly this, so this test pins it."""
+    (tmp_path / "test_a_before.py").write_text("def test_before():\n    pass\n", encoding="utf-8")
+    (tmp_path / "test_b_hang.py").write_text(
+        "import time\n\n\ndef test_hangs():\n    time.sleep(120)\n", encoding="utf-8"
     )
+    (tmp_path / "test_c_after.py").write_text("def test_after():\n    pass\n", encoding="utf-8")
     done = subprocess.run(
         [
             sys.executable,
@@ -112,15 +119,23 @@ def test_a_hanging_test_is_stopped_by_the_timeout_instead_of_hanging(tmp_path) -
             "no:cacheprovider",
             "-o",
             "timeout=3",
-            "-q",
+            "-v",
             "--rootdir",
             str(tmp_path),
-            str(tmp_path / "test_hang.py"),
+            str(tmp_path),
         ],
         cwd=tmp_path,
         capture_output=True,
         text=True,
         timeout=100,  # far below the 120 s the test would sleep; cold start is ~11 s
     )
+    out = done.stdout + done.stderr
     assert done.returncode != 0
-    assert "Timeout" in done.stdout + done.stderr
+    assert "test_before PASSED" in out  # tests before the hang ran
+    assert "Timeout" in out and "time.sleep(120)" in out  # the stack dump shows where it hung
+    if sys.platform == "win32":
+        assert "timeout method: thread" in out
+        assert "test_after" not in out  # the whole run was ended; later tests never ran
+        assert "FAILED" not in out and " passed" not in out  # no per-test result, no summary
+    else:
+        assert "test_after PASSED" in out  # the signal method fails only the hanging test
