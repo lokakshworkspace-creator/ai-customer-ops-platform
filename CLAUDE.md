@@ -16,7 +16,8 @@ by proposing actions. The backend decides whether they're allowed.
 FastAPI, SQLAlchemy 2 (async), Alembic, Pydantic v2, Postgres 16 + pgvector, Redis,
 Redpanda (Kafka-compatible), embeddings from Gemini (gemini-embedding-001, 768 dims) over httpx
 (no sentence-transformers),
-LLM via an `LLMClient` interface (Claude impl + FakeLLM for tests), Next.js + Tailwind (later).
+LLM via an `LLMClient` interface: the real client is `GeminiLLMClient` over httpx (`LLM_PROVIDER=gemini`);
+a gullible fake is the default and is used by all tests and demos. Frontend: Next.js + Tailwind (one chat page, no business logic).
 Hand-rolled FSM for orchestration with Postgres checkpoints.
 
 ## Architecture
