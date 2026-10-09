@@ -103,8 +103,12 @@ async def waiting_for_run(session: AsyncSession, run: WorkflowRun) -> WaitingFor
     return waiting_for(approval, refund)
 
 
-async def finish_waiting(session: AsyncSession, run_id: uuid.UUID) -> bool:
-    """Finish the workflow if what it waits for is final. Returns True if it changed."""
+async def finish_in_transaction(session: AsyncSession, run_id: uuid.UUID) -> bool:
+    """Finish the workflow if what it waits for is final. Returns True if it changed.
+
+    Neither commits nor rolls back: the CALLER owns the transaction. The resume consumer needs that,
+    because it runs inside the dedupe transaction (the `processed_events` claim and this effect must
+    commit together, and a rollback here would also undo the claim)."""
     run = (
         await session.execute(
             select(WorkflowRun)
@@ -114,15 +118,11 @@ async def finish_waiting(session: AsyncSession, run_id: uuid.UUID) -> bool:
         )
     ).scalar_one_or_none()
     if run is None or run.status != WorkflowStatus.waiting_approval:
-        await session.rollback()  # already finished (or never waiting): nothing to do
-        return False
+        return False  # already finished (or never waiting): nothing to do
 
     approval, refund = await _rows(session, run)
     if approval is None or refund is None or waiting_for(approval, refund) is not None:
-        await (
-            session.rollback()
-        )  # still waiting (a human, or the payout), or an unusable checkpoint
-        return False
+        return False  # still waiting (a human or the payout), or an unusable checkpoint
 
     ctx: dict[str, Any] = dict(run.context or {})
     text = outcome_text(approval, refund)
@@ -149,8 +149,17 @@ async def finish_waiting(session: AsyncSession, run_id: uuid.UUID) -> bool:
             completed_at=func.now(),
         )
     )
-    await session.commit()
     return True
+
+
+async def finish_waiting(session: AsyncSession, run_id: uuid.UUID) -> bool:
+    """`finish_in_transaction` in a transaction of its own: commit if it changed, else release."""
+    changed = await finish_in_transaction(session, run_id)
+    if changed:
+        await session.commit()
+    else:
+        await session.rollback()  # nothing to write: release the row lock
+    return changed
 
 
 async def sync_waiting(session: AsyncSession, run_id: uuid.UUID) -> bool:

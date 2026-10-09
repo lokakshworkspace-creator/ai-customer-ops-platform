@@ -17,6 +17,7 @@ MAY_IMPORT_KAFKA_WRAPPER = {  # app.events.kafka
     "events/relay.py",
     "events/consumers/base.py",
     "events/consumers/notifications.py",
+    "events/consumers/resume.py",  # only to build the consumer's dead-letter producer
 }
 MAY_CONSTRUCT_OUTBOX_EVENT = {"events/outbox.py"}
 MAY_CALL_ADD_EVENT = {  # events/outbox.py only DEFINES add_event
