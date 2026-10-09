@@ -1,0 +1,44 @@
+# Golden questions for the knowledge-base eval (rag/eval.py, scripts/kb_eval.py).
+#
+# A question is answered correctly if one of the retrieved chunks comes from `doc` (a file in
+# data/kb/) AND contains `contains` (case-insensitive; optional). `contains` is a fragment of the
+# document's rendered text, so the chunk that holds the fact is the one that counts. A test checks
+# that every fragment really occurs in its document, so a document edit cannot silently break a
+# golden question.
+#
+# Many questions are paraphrases on purpose (they share few words with the document), so that
+# keyword search and vector search can behave differently.
+questions:
+  - {id: q01, q: "How many days does standard delivery take?", doc: shipping.md, contains: "business days after your order is shipped"}
+  - {id: q02, q: "Do you offer express shipping?", doc: shipping.md, contains: "Express delivery"}
+  - {id: q03, q: "Is shipping free?", doc: shipping.md, contains: "free on orders above"}
+  - {id: q04, q: "Can I order from outside the country, do you ship abroad?", doc: shipping.md, contains: "internationally"}
+  - {id: q05, q: "My package is late, what can I do?", doc: shipping.md, contains: "has not arrived"}
+  - {id: q06, q: "What is the return window for my purchase?", doc: returns-policy.md, contains: "orders placed up to"}
+  - {id: q07, q: "Can I return clothes that I have already washed?", doc: returns-policy.md, contains: "unwashed"}
+  - {id: q08, q: "How do I send back something I bought?", doc: returns-policy.md, contains: "Tell the assistant which order and item"}
+  - {id: q09, q: "Can I return a laptop I have opened?", doc: returns-policy.md, contains: "like-new"}
+  - {id: q10, q: "How quickly does the money show up after a refund is approved?", doc: refunds.md, contains: "statement"}
+  - {id: q11, q: "When does a refund need a person to approve it?", doc: refunds.md, contains: "needs a person to review"}
+  - {id: q12, q: "In which cases is a refund refused?", doc: refunds.md, contains: "A refund is not allowed when"}
+  - {id: q13, q: "Can the assistant approve my refund by itself?", doc: refunds.md, contains: "cannot approve a refund"}
+  - {id: q14, q: "Can I cancel an order that I have not paid for yet?", doc: cancellations.md, contains: "before it has been paid"}
+  - {id: q15, q: "Can I cancel my order after it has shipped?", doc: cancellations.md, contains: "Once an order has shipped"}
+  - {id: q16, q: "Which payment methods can I use?", doc: payments.md, contains: "UPI"}
+  - {id: q17, q: "My payment failed. Will I be charged anyway?", doc: payments.md, contains: "you are not charged"}
+  - {id: q18, q: "Can my money be returned to a different bank account?", doc: payments.md, contains: "different account"}
+  - {id: q19, q: "Where can I get an invoice for my purchase?", doc: payments.md, contains: "invoice is available"}
+  - {id: q20, q: "How long is the warranty on my phone?", doc: warranty.md, contains: "12 months"}
+  - {id: q21, q: "Does the warranty cover water damage?", doc: warranty.md, contains: "water damage"}
+  - {id: q22, q: "My television stopped working after the return period ended, what now?", doc: warranty.md, contains: "warranty matter"}
+  - {id: q23, q: "What time is customer support open?", doc: contact-and-support.md, contains: "weekdays"}
+  - {id: q24, q: "How fast will my support ticket be answered?", doc: contact-and-support.md, contains: "answer tickets within"}
+  - {id: q25, q: "I received the wrong item. Do I have to send it back first?", doc: damaged-or-wrong-items.md, contains: "do not need to send the item back"}
+
+# Nothing in the knowledge base answers these. The right behaviour is "not found".
+out_of_scope:
+  - "Who won the cricket world cup in 2011?"
+  - "What is the best way to learn the guitar?"
+  - "Can you write me a poem about the sea?"
+  - "What is the weather like in Mumbai today?"
+  - "Do you have a loyalty programme or discount vouchers?"  # shop-related but not covered

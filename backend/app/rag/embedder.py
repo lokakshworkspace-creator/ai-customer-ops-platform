@@ -107,7 +107,7 @@ def _tokens(text: str) -> list[str]:
 class FakeEmbedder:
     name = "fake"
     default_min_cosine = 0.4  # fake vectors are lexical: stop words alone give ~0.3
-    default_min_ts_rank = 0.05
+    default_min_ts_rank = 0.12  # Postgres FTS, so the same for every embedder; see rag/eval.py
 
     def __init__(self, dim: int = 768) -> None:
         self.model = FAKE_MODEL
@@ -149,7 +149,7 @@ class GeminiEmbedder:
     name = "gemini"
     # Starting points; the golden-question run calibrates them for the real models.
     default_min_cosine = 0.55
-    default_min_ts_rank = 0.05
+    default_min_ts_rank = 0.12  # Postgres FTS, so the same for every embedder; see rag/eval.py
 
     def __init__(
         self,

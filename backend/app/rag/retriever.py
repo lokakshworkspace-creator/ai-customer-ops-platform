@@ -98,7 +98,7 @@ class RetrievalParams:
     pool: int = 20  # candidates taken from each of the two searches
     rrf_k: int = 60  # Reciprocal Rank Fusion constant
     min_cosine: float = 0.25
-    min_ts_rank: float = 0.05
+    min_ts_rank: float = 0.12
 
 
 @dataclass(frozen=True, slots=True)
