@@ -74,11 +74,34 @@ class Settings(BaseSettings):
     agent_turns_per_hour: int = Field(30, ge=1)  # per user: each turn costs real LLM money
     agent_max_message_chars: int = Field(2000, ge=1)
 
+    # Knowledge base / RAG (Phase 4). `fake` (the default) is a deterministic hash-based embedder
+    # for dev and tests; `gemini` calls the Gemini embeddings API with GEMINI_API_KEY. The model
+    # name is never hard-coded: EMBEDDING_MODEL names one of Google's embedding models. Vectors of
+    # different models are not comparable, so every chunk stores the model that made it and
+    # retrieval only compares against the current one. EMBEDDING_DIM must equal the dimension of
+    # the `kb_chunks.embedding` column (migration 0004 created it as vector(768)); ingest and
+    # retrieval check both and refuse to run on a mismatch.
+    embedding_provider: Literal["fake", "gemini"] = "fake"
+    embedding_model: str | None = None
+    embedding_dim: int = Field(768, ge=8, le=2000)  # pgvector HNSW indexes allow up to 2000
+    embedding_timeout_s: float = Field(30.0, gt=0)
+    embedding_batch_size: int = Field(8, ge=1, le=100)
+    embedding_min_interval_s: float = Field(0.3, ge=0)  # pause between embedding calls (ingest)
+    embedding_max_retries: int = Field(5, ge=0)  # retries after a transient failure (429, 5xx)
+    kb_namespace: str = Field("default", min_length=1, max_length=64)
+    rag_top_k: int = Field(4, ge=1, le=6)
+    rag_pool: int = Field(20, ge=1)  # candidates taken from each of the vector and keyword searches
+    rag_rrf_k: int = Field(60, ge=1)  # Reciprocal Rank Fusion constant
+    # Minimum relevance, on the ABSOLUTE scores (RRF only ranks): cosine similarity of the vector
+    # hit, or the keyword rank. None = the embedder's own calibrated default.
+    rag_min_cosine: float | None = Field(None, ge=-1, le=1)
+    rag_min_ts_rank: float | None = Field(None, ge=0)
+
     # HS256 is pinned in app.core.security (not configurable).
     jwt_secret: str = DEV_JWT_SECRET
     jwt_expire_minutes: int = 30
 
-    @field_validator("gemini_api_key", "llm_model", mode="before")
+    @field_validator("gemini_api_key", "llm_model", "embedding_model", mode="before")
     @classmethod
     def _blank_means_unset(cls, v: object) -> object:
         """`GEMINI_API_KEY=` / `LLM_MODEL=` (blank, as in .env.example) mean "not set"."""

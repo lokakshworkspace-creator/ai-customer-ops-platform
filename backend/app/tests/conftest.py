@@ -25,6 +25,8 @@ from sqlalchemy.ext.asyncio import (
 os.environ["LLM_PROVIDER"] = "fake"
 os.environ["GEMINI_API_KEY"] = ""
 os.environ["LLM_MODEL"] = ""
+os.environ["EMBEDDING_PROVIDER"] = "fake"
+os.environ["EMBEDDING_MODEL"] = ""
 
 from app.api.deps import get_executor, get_session
 from app.core.config import get_settings
