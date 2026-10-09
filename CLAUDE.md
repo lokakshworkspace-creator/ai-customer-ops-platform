@@ -14,7 +14,8 @@ by proposing actions. The backend decides whether they're allowed.
 
 ## Stack
 FastAPI, SQLAlchemy 2 (async), Alembic, Pydantic v2, Postgres 16 + pgvector, Redis,
-Redpanda (Kafka-compatible), sentence-transformers (BAAI/bge-small-en-v1.5),
+Redpanda (Kafka-compatible), embeddings from Gemini (gemini-embedding-001, 768 dims) over httpx
+(no sentence-transformers),
 LLM via an `LLMClient` interface (Claude impl + FakeLLM for tests), Next.js + Tailwind (later).
 Hand-rolled FSM for orchestration with Postgres checkpoints.
 
@@ -24,7 +25,7 @@ Modular monolith. Order/Refund/Ticket are modules with service + repo layers, no
 backend/app/
   api/ (routers, deps, middleware) · core/ (config, security, logging) · agent/ (FSM, prompts, llm)
   policy/ (engine + rules.yaml) · tools/ (registry, schemas, executor) · modules/ (orders, refunds, tickets)
-  events/ (outbox, relay, consumers) · rag/ (ingest, retriever, answerer, eval) · db/ (models, migrations) · tests/
+  events/ (outbox, relay, consumers) · rag/ (embedder, kb, chunker, ingest, retriever, guards, eval; documents in data/kb) · db/ (models, migrations) · tests/
 
 ## Policy outcomes
 ALLOW | REQUIRE_APPROVAL | DENY, always with a reason (written to audit_logs).
@@ -41,4 +42,4 @@ ALLOW | REQUIRE_APPROVAL | DENY, always with a reason (written to audit_logs).
 0 Foundation · 1 Core domain + auth · 2 Tools + policy + refunds (+ outbox relay/consumers)
 3 Agent + LLM + first UI · 4 RAG · 5 Human approval + events · 6 Resilience, observability, evals · 7 Polish
 
-## Current phase: Phases 0-2 done. Next: Phase 3 (agent)
+## Current phase: Phases 0-4 done. Next: Phase 5 (admin approvals page, event-driven resume)
