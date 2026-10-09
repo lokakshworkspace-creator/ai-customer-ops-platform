@@ -154,5 +154,26 @@
       ],
       "type": "OBJECT"
     }
+  },
+  "search_knowledge_base": {
+    "description": "Search the shop's help articles for policies and FAQs (shipping, returns, refunds, payments, warranty, support hours). Use it for questions about how the shop works. It returns excerpts to quote or summarise; it cannot change anything.",
+    "name": "search_knowledge_base",
+    "parameters": {
+      "properties": {
+        "query": {
+          "description": "The customer's question about shop policies or FAQs, in plain words.",
+          "maxLength": 500,
+          "minLength": 2,
+          "type": "STRING"
+        }
+      },
+      "propertyOrdering": [
+        "query"
+      ],
+      "required": [
+        "query"
+      ],
+      "type": "OBJECT"
+    }
   }
 }

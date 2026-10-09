@@ -49,6 +49,7 @@ def test_the_model_sees_exactly_the_agent_visible_tools() -> None:
         "create_ticket",
         "cancel_order",
         "request_refund",
+        "search_knowledge_base",
     }
     assert set(DEFS) == {t.name for t in REGISTRY.all() if t.agent_visible}
 

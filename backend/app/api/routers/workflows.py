@@ -44,6 +44,7 @@ async def get_workflow(
         "reply": response.get("reply"),  # the original reply, as sent
         "latest_message": texts[-1] if texts else None,  # includes a later "approved / paid" update
         "tool_results": response.get("tool_results", []),
+        "sources": response.get("sources", []),
         "llm": response.get("llm"),
         "waiting_for_approval": run.status == WorkflowStatus.waiting_approval,
     }

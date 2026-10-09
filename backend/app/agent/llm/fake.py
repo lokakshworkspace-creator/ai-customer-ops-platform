@@ -105,6 +105,10 @@ _REFUND_RE = re.compile(
 )
 _EXTRA_RE = re.compile(r"\b(user_id|role|idempotency_key)\s*=\s*([^\s,;]+)", re.I)
 _ZERO = "00000000-0000-0000-0000-000000000000"
+_FAQ_RE = re.compile(
+    r"\?|\b(policy|policies|shipping|delivery|warranty|payments?|hours|how (long|do|can))\b", re.I
+)
+_EXCERPT_RE = re.compile(r"<<<EXCERPT \d+\n(.*?)\nEND EXCERPT \d+>>>", re.S)
 
 
 def _money(raw: str) -> str:
@@ -206,9 +210,33 @@ class ObedientFakeLLM(_Recording):
                 return call("list_orders", **extras)
             return say(self._summary(results))
 
+        # 4. Policy / FAQ questions: look them up, then answer from the excerpt (or admit it).
+        if "search_knowledge_base" in executed:
+            return say(self._kb_answer(results))
+        if _FAQ_RE.search(user_text):
+            return call("search_knowledge_base", query=user_text[:500])
+
         if results:
             return say(self._summary(results))
         return say("Hello! I can look up your orders, request refunds and open support tickets.")
+
+    @staticmethod
+    def _kb_answer(results: list[tuple[str, Any, str]]) -> str:
+        for name, parsed, _ in results:
+            if name != "search_knowledge_base" or not isinstance(parsed, dict):
+                continue
+            data = parsed.get("data") or {}
+            if parsed.get("status") != "succeeded":
+                return "I could not look that up just now. I can open a support ticket for you."
+            excerpts = data.get("excerpts") or []
+            if not data.get("found") or not excerpts:
+                return (
+                    "I am not sure about that. I can open a support ticket for a person to answer."
+                )
+            m = _EXCERPT_RE.search(excerpts[0].get("text", ""))
+            body = " ".join((m.group(1) if m else "").split())
+            return f"{excerpts[0].get('source', 'Help article')}: {body[:400]}"
+        return "I am not sure about that."
 
     @staticmethod
     def _args_for(tool: str, sources: str, near: str | None) -> dict[str, Any]:

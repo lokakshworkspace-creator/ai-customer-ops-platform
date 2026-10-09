@@ -59,8 +59,8 @@
     "id": "A8",
     "desc": "tool results reach the model unfiltered (user ids, notes, hashes)",
     "file": "app/agent/results_view.py",
-    "old": "    data = data or {}\n    if tool == \"list_orders\":",
-    "new": "    return data or {}\n    if tool == \"list_orders\":",
+    "old": "    data = data or {}\n    if tool == KB_TOOL:",
+    "new": "    return data or {}\n    if tool == KB_TOOL:",
     "tests": "app/tests/test_agent_fsm.py"
   },
   {

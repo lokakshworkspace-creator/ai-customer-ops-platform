@@ -359,6 +359,7 @@ async def test_the_model_is_shown_only_agent_visible_tools_and_the_system_prompt
         "create_ticket",
         "cancel_order",
         "request_refund",
+        "search_knowledge_base",
     }
     assert "never" in seen.system and "approve_refund" in seen.system  # told it has no admin tools
 

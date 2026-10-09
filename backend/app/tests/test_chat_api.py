@@ -116,6 +116,7 @@ async def test_a_small_refund_through_http(client, db_session, world) -> None:
         "status",
         "reply",
         "tool_results",
+        "sources",
         "llm",
     }
     assert j["status"] == "completed" and j["llm"] == "fake"

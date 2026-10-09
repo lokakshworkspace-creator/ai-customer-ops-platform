@@ -36,6 +36,12 @@ class CreateTicketInput(ToolInput):
     priority: TicketPriority = Field(TicketPriority.normal, description="low, normal or high.")
 
 
+class SearchKnowledgeBaseInput(ToolInput):
+    query: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=2, max_length=500)
+    ] = Field(description="The customer's question about shop policies or FAQs, in plain words.")
+
+
 class CancelOrderInput(ToolInput):
     order_id: uuid.UUID = Field(description="The id (UUID) of the unpaid order to cancel.")
 

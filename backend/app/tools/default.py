@@ -3,6 +3,8 @@
 from app.db.models.enums import Role
 from app.modules.refunds.payments import PaymentProvider, get_payment_provider
 from app.policy.rules import Rules
+from app.rag.embedder import Embedder
+from app.tools.handlers.knowledge import SearchKnowledgeBaseHandler
 from app.tools.handlers.orders import CancelOrderHandler, GetOrderHandler, ListOrdersHandler
 from app.tools.handlers.refunds import (
     ApproveRefundHandler,
@@ -19,13 +21,16 @@ from app.tools.schemas import (
     ListOrdersInput,
     RejectRefundInput,
     RequestRefundInput,
+    SearchKnowledgeBaseInput,
 )
 
 BOTH = frozenset({Role.customer, Role.admin})
 ADMIN = frozenset({Role.admin})
 
 
-def build_default_registry(rules: Rules, provider: PaymentProvider | None = None) -> ToolRegistry:
+def build_default_registry(
+    rules: Rules, provider: PaymentProvider | None = None, embedder: Embedder | None = None
+) -> ToolRegistry:
     provider = provider or get_payment_provider()
     reg = ToolRegistry(rules)
     reg.register(
@@ -48,6 +53,21 @@ def build_default_registry(rules: Rules, provider: PaymentProvider | None = None
             mutating=False,
             agent_visible=True,
             handler=ListOrdersHandler(),
+        )
+    )
+    reg.register(
+        ToolSpec(
+            name="search_knowledge_base",
+            description=(
+                "Search the shop's help articles for policies and FAQs (shipping, returns, "
+                "refunds, payments, warranty, support hours). Use it for questions about how the "
+                "shop works. It returns excerpts to quote or summarise; it cannot change anything."
+            ),
+            input_model=SearchKnowledgeBaseInput,
+            required_roles=BOTH,
+            mutating=False,
+            agent_visible=True,
+            handler=SearchKnowledgeBaseHandler(embedder),
         )
     )
     reg.register(

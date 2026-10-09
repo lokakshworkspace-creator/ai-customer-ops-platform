@@ -45,6 +45,7 @@ from app.agent.prompts import SYSTEM_PROMPT
 from app.agent.results_view import (
     awaiting_approval,
     is_error,
+    sources_of,
     tool_result_text,
     ui_summary,
 )
@@ -112,6 +113,7 @@ def make_response(
     reply: str,
     tool_results: list[dict[str, Any]],
     llm: str,
+    sources: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "conversation_id": str(conversation_id),
@@ -120,6 +122,7 @@ def make_response(
         "status": status.value,
         "reply": reply,
         "tool_results": tool_results,
+        "sources": sources or [],
         "llm": llm,
     }
 
@@ -362,6 +365,7 @@ class Orchestrator:
         t.turn_calls += 1
         t.conv_calls += 1
         t.summaries.append(ui_summary(outcome))
+        t.add_sources(sources_of(outcome))
         t.calls.append(
             {
                 "tool": use.name,
@@ -487,6 +491,7 @@ class Orchestrator:
             status=status,
             reply=reply,
             tool_results=t.summaries,
+            sources=t.sources,
             llm=self.llm.name,
         )
 
@@ -533,9 +538,14 @@ class _Turn:
         self.state = State.PROPOSE
         self.reply = ""
         self.summaries: list[dict[str, Any]] = []
+        self.sources: list[dict[str, Any]] = []  # documents the answer rests on (backend-computed)
         self.calls: list[dict[str, Any]] = []
         self.approval_id: str | None = None
         self.refund_id: str | None = None
+
+    def add_sources(self, new: list[dict[str, Any]]) -> None:
+        known = {s["document_id"] for s in self.sources}
+        self.sources.extend(s for s in new if s["document_id"] not in known)
 
     def add(self, session: AsyncSession, role: MessageRole, message: LLMMessage) -> None:
         self.history.append(message)
