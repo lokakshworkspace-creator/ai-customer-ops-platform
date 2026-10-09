@@ -65,3 +65,4 @@ extend-immutable-calls = [
 "app/api/routers/refunds.py" = ["E501"]  # wide markdown table in the OpenAPI description
 "../scripts/demo_phase2.py" = ["E501"]  # human-readable output strings
 "../scripts/demo_phase3.py" = ["E501"]  # human-readable output strings
+"../scripts/kb_ingest.py" = ["E501"]  # human-readable output strings
