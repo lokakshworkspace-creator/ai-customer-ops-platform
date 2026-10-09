@@ -67,7 +67,8 @@ fused AS (
   SELECT COALESCE(vec.id, kw.id) AS id, vec.cosine, kw.ts_rank,
          COALESCE(1.0 / (:rrf_k + vec.rnk), 0) + COALESCE(1.0 / (:rrf_k + kw.rnk), 0) AS rrf
   FROM vec FULL OUTER JOIN kw ON kw.id = vec.id)
-SELECT c.id, c.document_id, d.title, c.heading, c.content, f.cosine, f.ts_rank, f.rrf
+SELECT c.id, c.document_id, d.title, c.heading, c.content, f.cosine, f.ts_rank, f.rrf,
+       d.audience
 FROM fused f JOIN kb_chunks c ON c.id = f.id JOIN kb_documents d ON d.id = c.document_id
 WHERE {_SCOPE} AND (f.cosine >= :min_cosine OR f.ts_rank >= :min_ts_rank)
 ORDER BY f.rrf DESC, d.source, c.ordinal
@@ -77,7 +78,8 @@ WITH p AS (SELECT CAST(:qvec AS vector) AS v),
 {_VEC_CTE},
 fused AS (SELECT vec.id, vec.cosine, NULL::real AS ts_rank,
                  1.0 / (:rrf_k + vec.rnk) AS rrf FROM vec)
-SELECT c.id, c.document_id, d.title, c.heading, c.content, f.cosine, f.ts_rank, f.rrf
+SELECT c.id, c.document_id, d.title, c.heading, c.content, f.cosine, f.ts_rank, f.rrf,
+       d.audience
 FROM fused f JOIN kb_chunks c ON c.id = f.id JOIN kb_documents d ON d.id = c.document_id
 WHERE {_SCOPE} AND f.cosine >= :min_cosine
 ORDER BY f.rrf DESC, d.source, c.ordinal
@@ -87,7 +89,8 @@ WITH p AS (SELECT to_tsquery('english', :tsq) AS tsq),
 {_KW_CTE},
 fused AS (SELECT kw.id, NULL::double precision AS cosine, kw.ts_rank,
                  1.0 / (:rrf_k + kw.rnk) AS rrf FROM kw)
-SELECT c.id, c.document_id, d.title, c.heading, c.content, f.cosine, f.ts_rank, f.rrf
+SELECT c.id, c.document_id, d.title, c.heading, c.content, f.cosine, f.ts_rank, f.rrf,
+       d.audience
 FROM fused f JOIN kb_chunks c ON c.id = f.id JOIN kb_documents d ON d.id = c.document_id
 WHERE {_SCOPE} AND f.ts_rank >= :min_ts_rank
 ORDER BY f.rrf DESC, d.source, c.ordinal
@@ -114,6 +117,7 @@ class Hit:
     cosine: float | None  # None when the chunk was found by keywords only
     ts_rank: float | None  # None when the chunk was found by vector similarity only
     rrf: float
+    audience: str = "customer"  # the document's audience (staff lookup shows it)
 
 
 def keyword_query(query: str) -> str | None:
@@ -165,7 +169,17 @@ async def search(
     await session.execute(text("SET LOCAL hnsw.iterative_scan = relaxed_order"))
     rows = (await session.execute(text(_SQL[mode]), bind)).all()
     return [
-        Hit(r.id, r.document_id, r.title, r.heading, r.content, r.cosine, r.ts_rank, float(r.rrf))
+        Hit(
+            r.id,
+            r.document_id,
+            r.title,
+            r.heading,
+            r.content,
+            r.cosine,
+            r.ts_rank,
+            float(r.rrf),
+            r.audience,
+        )
         for r in rows
     ]
 

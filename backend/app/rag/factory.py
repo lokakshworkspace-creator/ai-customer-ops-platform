@@ -12,6 +12,7 @@ import structlog
 
 from app.core.config import Settings, get_settings
 from app.rag.embedder import Embedder, EmbedderConfigError, FakeEmbedder, GeminiEmbedder
+from app.rag.retriever import RetrievalParams
 
 log = structlog.get_logger(__name__)
 
@@ -39,6 +40,22 @@ def build_embedder(settings: Settings) -> Embedder:
     raise EmbedderConfigError(
         "No embedder is configured: set EMBEDDING_PROVIDER=gemini with EMBEDDING_MODEL "
         "(and GEMINI_API_KEY)."
+    )
+
+
+def retrieval_params(embedder: Embedder) -> RetrievalParams:
+    """Search parameters from settings; an unset threshold is the embedder's calibrated one."""
+    s = get_settings()
+    return RetrievalParams(
+        top_k=s.rag_top_k,
+        pool=s.rag_pool,
+        rrf_k=s.rag_rrf_k,
+        min_cosine=s.rag_min_cosine
+        if s.rag_min_cosine is not None
+        else embedder.default_min_cosine,
+        min_ts_rank=(
+            s.rag_min_ts_rank if s.rag_min_ts_rank is not None else embedder.default_min_ts_rank
+        ),
     )
 
 

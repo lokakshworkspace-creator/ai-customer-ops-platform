@@ -25,32 +25,18 @@ from app.db.models.enums import KbAudience, ToolCallStatus
 from app.policy import evaluate_read
 from app.policy.rules import Rules
 from app.rag.embedder import Embedder, EmbedderError
-from app.rag.factory import get_embedder
+from app.rag.factory import get_embedder, retrieval_params
 from app.rag.guards import KbConfigError
-from app.rag.retriever import RetrievalParams, ensure_ready, search
+from app.rag.retriever import ensure_ready, search
 from app.tools.context import ToolContext
 from app.tools.handlers.base import AfterCommitResult, Decision, ToolResult
 from app.tools.schemas import SearchKnowledgeBaseInput
 
 log = structlog.get_logger(__name__)
 
-# Fixed on purpose. Internal documents for administrators arrive with the admin UI (Phase 5).
+# Fixed on purpose, for EVERY caller. Administrators read internal documents through the staff
+# lookup (an admin-only endpoint that does not involve the model), never through the assistant.
 AGENT_AUDIENCES: tuple[KbAudience, ...] = (KbAudience.customer,)
-
-
-def retrieval_params(embedder: Embedder) -> RetrievalParams:
-    s = get_settings()
-    return RetrievalParams(
-        top_k=s.rag_top_k,
-        pool=s.rag_pool,
-        rrf_k=s.rag_rrf_k,
-        min_cosine=s.rag_min_cosine
-        if s.rag_min_cosine is not None
-        else embedder.default_min_cosine,
-        min_ts_rank=(
-            s.rag_min_ts_rank if s.rag_min_ts_rank is not None else embedder.default_min_ts_rank
-        ),
-    )
 
 
 class SearchKnowledgeBaseHandler:
