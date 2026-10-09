@@ -60,6 +60,11 @@ class MessageRole(StrEnum):
     tool = "tool"  # tool results (sent to the model inside a user message)
 
 
+class KbAudience(StrEnum):
+    customer = "customer"  # may be shown to customers (the only audience the agent searches)
+    internal = "internal"  # staff-only (admin pages come in Phase 5)
+
+
 class ApprovalStatus(StrEnum):
     pending = "pending"
     approved = "approved"

@@ -2,6 +2,7 @@
 
 from app.db.models.approval import Approval
 from app.db.models.audit_log import AuditLog
+from app.db.models.kb import KbChunk, KbDocument
 from app.db.models.message import Message
 from app.db.models.order import Order, OrderItem
 from app.db.models.outbox import OutboxEvent
@@ -16,6 +17,8 @@ from app.db.models.workflow import WorkflowRun
 __all__ = [
     "Approval",
     "AuditLog",
+    "KbChunk",
+    "KbDocument",
     "Message",
     "Order",
     "OrderItem",

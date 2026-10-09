@@ -1,4 +1,5 @@
 import asyncio
+import warnings
 from logging.config import fileConfig
 
 from alembic import context
@@ -17,6 +18,10 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
+
+# Alembic cannot reflect pgvector's `vector` type and warns once per column; the column is described
+# by our own `Vector` type (app/db/vector.py) and checked by tests and rag/guards.py.
+warnings.filterwarnings("ignore", message="Did not recognize type 'vector'")
 
 # An explicitly configured URL (e.g. the test suite) wins over the environment.
 if not config.get_main_option("sqlalchemy.url"):
