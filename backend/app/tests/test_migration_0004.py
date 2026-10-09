@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.db.vector import vector_literal
 from app.rag.guards import (
+    KbConfigError,
     KbDimensionMismatch,
     KbNotIndexed,
     check_dimension,
@@ -156,6 +157,14 @@ async def test_the_dimension_guard_passes_for_768_and_fails_loudly_otherwise(
     await check_dimension(db_session, 768)
     with pytest.raises(KbDimensionMismatch, match=r"EMBEDDING_DIM=1536 .* vector\(768\)"):
         await check_dimension(db_session, 1536)
+
+
+async def test_missing_knowledge_base_tables_are_a_clear_error_not_a_sql_error(
+    db_session: AsyncSession,
+) -> None:
+    await db_session.execute(text("DROP TABLE kb_chunks CASCADE"))  # rolled back with the test
+    with pytest.raises(KbConfigError, match="alembic upgrade head"):
+        await check_dimension(db_session, 768)
 
 
 async def test_chunks_from_another_model_are_a_loud_not_indexed_error(

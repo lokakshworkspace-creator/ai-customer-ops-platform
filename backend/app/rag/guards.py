@@ -27,6 +27,8 @@ class KbNotIndexed(KbConfigError):
 
 
 async def column_dimension(session: AsyncSession) -> int:
+    if await session.scalar(text("SELECT to_regclass('kb_chunks')")) is None:
+        raise KbConfigError("The knowledge-base tables do not exist: run `alembic upgrade head`.")
     dim = await session.scalar(
         text(
             "SELECT atttypmod FROM pg_attribute "
