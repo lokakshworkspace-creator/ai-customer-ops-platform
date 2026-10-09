@@ -221,3 +221,15 @@ def test_the_keyword_query_keeps_only_safe_alphanumeric_terms() -> None:
     assert keyword_query("") is None and keyword_query("the of and") is None
     assert keyword_query("shipping shipping") == "shipping"
     assert keyword_query("x'); DROP TABLE a; --") == "drop | table"
+
+
+async def test_a_ranking_is_the_same_after_a_re_ingest_with_new_random_ids(kb) -> None:
+    """Ties (equal keyword rank or fused score) are broken by document and position, never by the
+    random chunk id, so the order does not change between two ingests of the same text."""
+    await load(kb, ns="again")
+    for q in ("shipping", "order refund", "what happens to my order"):
+        for mode in ("hybrid", "keyword", "vector"):
+            a = await ask(kb, q, mode=mode, top_k=8, min_cosine=-1, min_ts_rank=0)
+            b = await ask(kb, q, mode=mode, ns="again", top_k=8, min_cosine=-1, min_ts_rank=0)
+            assert [(h.doc_title, h.heading) for h in a] == [(h.doc_title, h.heading) for h in b]
+            assert {h.chunk_id for h in a}.isdisjoint({h.chunk_id for h in b})

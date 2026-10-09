@@ -147,8 +147,10 @@ def is_gemini_2(model: str) -> bool:
 
 class GeminiEmbedder:
     name = "gemini"
-    # Starting points; the golden-question run calibrates them for the real models.
-    default_min_cosine = 0.55
+    # Calibrated on the golden questions (scripts/kb_eval.py): halfway between the lowest best
+    # cosine of an in-scope question and the highest best cosine of an out-of-scope one, per model
+    # (gemini-embedding-001: 0.589 / 0.567; gemini-embedding-2: 0.656 / 0.625). The gap is small
+    # and the sample is 30 questions, so treat these as a starting point to re-check.
     default_min_ts_rank = 0.12  # Postgres FTS, so the same for every embedder; see rag/eval.py
 
     def __init__(
@@ -167,6 +169,7 @@ class GeminiEmbedder:
     ) -> None:
         self.model = model
         self.dim = dim
+        self.default_min_cosine = 0.64 if is_gemini_2(model) else 0.58
         self.calls_made = 0
         self._batch_size = batch_size
         self._min_interval_s = min_interval_s

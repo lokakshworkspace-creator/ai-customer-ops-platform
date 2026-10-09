@@ -9,6 +9,9 @@ a chunk of an audience that is not in the list cannot be returned by any phrasin
 The namespace and the embedding model are filtered the same way (vectors of different models are
 not comparable).
 
+Ties are broken by (document source, chunk ordinal), never by a random id, so a ranking is the same
+after every re-ingest.
+
 Relevance: RRF only ranks, so "nothing relevant" is decided on ABSOLUTE scores: a chunk is returned
 only if its cosine similarity is >= `min_cosine` or its keyword rank is >= `min_ts_rank`.
 """
@@ -42,18 +45,18 @@ _SCOPE = "d.audience = ANY(:audiences) AND d.namespace = :ns"
 _VEC_CTE = f"""
 vec AS (
   SELECT c.id, 1 - (c.embedding <=> p.v) AS cosine,
-         ROW_NUMBER() OVER (ORDER BY c.embedding <=> p.v) AS rnk
+         ROW_NUMBER() OVER (ORDER BY c.embedding <=> p.v, d.source, c.ordinal) AS rnk
   FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id CROSS JOIN p
   WHERE {_SCOPE} AND c.embedding_model = :model
-  ORDER BY c.embedding <=> p.v
+  ORDER BY c.embedding <=> p.v, d.source, c.ordinal
   LIMIT :pool)"""
 _KW_CTE = f"""
 kw AS (
   SELECT c.id, ts_rank_cd(c.tsv, p.tsq, 32) AS ts_rank,
-         ROW_NUMBER() OVER (ORDER BY ts_rank_cd(c.tsv, p.tsq, 32) DESC) AS rnk
+         ROW_NUMBER() OVER (ORDER BY ts_rank_cd(c.tsv, p.tsq, 32) DESC, d.source, c.ordinal) AS rnk
   FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id CROSS JOIN p
   WHERE {_SCOPE} AND c.tsv @@ p.tsq
-  ORDER BY ts_rank DESC
+  ORDER BY ts_rank DESC, d.source, c.ordinal
   LIMIT :pool)"""
 
 _SQL = {
@@ -67,7 +70,7 @@ fused AS (
 SELECT c.id, c.document_id, d.title, c.heading, c.content, f.cosine, f.ts_rank, f.rrf
 FROM fused f JOIN kb_chunks c ON c.id = f.id JOIN kb_documents d ON d.id = c.document_id
 WHERE {_SCOPE} AND (f.cosine >= :min_cosine OR f.ts_rank >= :min_ts_rank)
-ORDER BY f.rrf DESC, c.id
+ORDER BY f.rrf DESC, d.source, c.ordinal
 LIMIT :top_k""",
     "vector": f"""
 WITH p AS (SELECT CAST(:qvec AS vector) AS v),
@@ -77,7 +80,7 @@ fused AS (SELECT vec.id, vec.cosine, NULL::real AS ts_rank,
 SELECT c.id, c.document_id, d.title, c.heading, c.content, f.cosine, f.ts_rank, f.rrf
 FROM fused f JOIN kb_chunks c ON c.id = f.id JOIN kb_documents d ON d.id = c.document_id
 WHERE {_SCOPE} AND f.cosine >= :min_cosine
-ORDER BY f.rrf DESC, c.id
+ORDER BY f.rrf DESC, d.source, c.ordinal
 LIMIT :top_k""",
     "keyword": f"""
 WITH p AS (SELECT to_tsquery('english', :tsq) AS tsq),
@@ -87,7 +90,7 @@ fused AS (SELECT kw.id, NULL::double precision AS cosine, kw.ts_rank,
 SELECT c.id, c.document_id, d.title, c.heading, c.content, f.cosine, f.ts_rank, f.rrf
 FROM fused f JOIN kb_chunks c ON c.id = f.id JOIN kb_documents d ON d.id = c.document_id
 WHERE {_SCOPE} AND f.ts_rank >= :min_ts_rank
-ORDER BY f.rrf DESC, c.id
+ORDER BY f.rrf DESC, d.source, c.ordinal
 LIMIT :top_k""",
 }
 
