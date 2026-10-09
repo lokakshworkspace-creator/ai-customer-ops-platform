@@ -1,6 +1,6 @@
 {
   "cancel_order": {
-    "description": "Cancel an unpaid order. Paid orders must be refunded instead.",
+    "description": "Cancel an unpaid order. Paid orders must be refunded instead. This changes the order: call it only after the customer has explicitly agreed to the cancellation.",
     "name": "cancel_order",
     "parameters": {
       "properties": {
@@ -106,7 +106,7 @@
     }
   },
   "request_refund": {
-    "description": "Request a refund for one of the caller's orders. Policy decides: small refunds are paid immediately, larger or unusual ones wait for human approval.",
+    "description": "Request a refund for one of the caller's orders. Policy decides: small refunds are paid immediately, larger or unusual ones wait for human approval. Only call it once the customer has given the reason (or it is clearly implied); ask them otherwise, never choose a reason yourself. Unpaid (pending) orders cannot be refunded: offer to cancel them instead.",
     "name": "request_refund",
     "parameters": {
       "properties": {
@@ -126,7 +126,7 @@
           "type": "STRING"
         },
         "reason_code": {
-          "description": "Why the customer wants a refund.",
+          "description": "Why the customer wants a refund, as THEY said it. Ask if they did not say; never choose one yourself, and use 'other' only for a stated reason that fits none of the listed ones.",
           "enum": [
             "changed_mind",
             "damaged",

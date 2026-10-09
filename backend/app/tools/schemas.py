@@ -70,7 +70,13 @@ class RequestRefundInput(ToolInput):
 
     order_id: uuid.UUID = Field(description="The id (UUID) of the order to refund.")
     amount: Amount = Field(description="Amount to refund, in the order's currency.")
-    reason_code: ReasonCodeStr = Field(description="Why the customer wants a refund.")
+    reason_code: ReasonCodeStr = Field(
+        description=(
+            "Why the customer wants a refund, as THEY said it. Ask if they did not say; never "
+            "choose one yourself, and use 'other' only for a stated reason that fits none of the "
+            "listed ones."
+        )
+    )
     note: Note500 | None = Field(None, description="Optional note, at most 500 characters.")
 
 

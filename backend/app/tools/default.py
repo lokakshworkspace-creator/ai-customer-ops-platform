@@ -84,7 +84,10 @@ def build_default_registry(
     reg.register(
         ToolSpec(
             name="cancel_order",
-            description="Cancel an unpaid order. Paid orders must be refunded instead.",
+            description=(
+                "Cancel an unpaid order. Paid orders must be refunded instead. This changes the "
+                "order: call it only after the customer has explicitly agreed to the cancellation."
+            ),
             input_model=CancelOrderInput,
             required_roles=BOTH,
             mutating=True,
@@ -97,7 +100,10 @@ def build_default_registry(
             name="request_refund",
             description=(
                 "Request a refund for one of the caller's orders. Policy decides: small refunds "
-                "are paid immediately, larger or unusual ones wait for human approval."
+                "are paid immediately, larger or unusual ones wait for human approval. Only call "
+                "it once the customer has given the reason (or it is clearly implied); ask them "
+                "otherwise, never choose a reason yourself. Unpaid (pending) orders cannot be "
+                "refunded: offer to cancel them instead."
             ),
             input_model=RequestRefundInput,
             required_roles=BOTH,
