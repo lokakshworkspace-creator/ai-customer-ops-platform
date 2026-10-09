@@ -84,7 +84,7 @@ function SourceChips({ sources }: { sources: Source[] }) {
   if (sources.length === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-1.5 text-xs" aria-label="Sources">
-      <span className="text-slate-500">Sources:</span>
+      <span className="text-slate-500">Sources consulted:</span>
       {sources.map((s) => (
         <span
           key={s.document_id}
