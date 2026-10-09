@@ -318,3 +318,17 @@ async def test_a_search_failure_is_reported_not_hidden(db_session, world) -> Non
     assert r["tool_results"][0]["summary"] == results_view.GENERIC_ERRORS["KB_UNAVAILABLE"]
     tool_result = llm.calls[1].messages[-1].content[0].content  # what the model was told
     assert "rate limited" not in tool_result and "SECRETKEY" not in tool_result
+
+
+async def test_a_document_found_by_two_searches_in_one_turn_is_cited_once(
+    db_session, world
+) -> None:
+    llm = ScriptedLLM(
+        call("search_knowledge_base", query="how long does shipping take"),
+        call("search_knowledge_base", query="shipping and delivery times"),
+        say("Orders ship within a few days."),
+    )
+    r = (await chat(make_orchestrator(llm), db_session, world.alice, "shipping?")).response
+    assert [t["tool"] for t in r["tool_results"]] == ["search_knowledge_base"] * 2
+    ids = [s["document_id"] for s in r["sources"]]
+    assert ids and len(ids) == len(set(ids))

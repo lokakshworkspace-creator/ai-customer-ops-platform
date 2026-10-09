@@ -41,10 +41,10 @@
   },
   {
     "id": "K6",
-    "desc": "the same document is listed as a source once per chunk",
-    "file": "app/agent/results_view.py",
-    "old": "        if doc not in seen:\n",
-    "new": "        if True:\n",
+    "desc": "a document found by two searches in one turn is listed twice as a source",
+    "file": "app/agent/orchestrator.py",
+    "old": "self.sources.extend(s for s in new if s[\"document_id\"] not in known)",
+    "new": "self.sources.extend(new)",
     "tests": "app/tests/test_rag_tool.py"
   },
   {
