@@ -400,6 +400,14 @@ class Orchestrator:
             ctx["approval_id"], ctx["refund_id"] = t.approval_id, t.refund_id
         await store.checkpoint(session, t.run_id, final, ctx, response=response)
         await session.commit()
+        if waiting:
+            # The race: an admin may have decided between the tool call that created the approval
+            # and this commit (the model's final answer takes seconds). That decision's event found
+            # a workflow that was not waiting yet and did nothing. Look once now, after the commit:
+            # a decision committed BEFORE this point is seen here, one committed AFTER it is
+            # delivered to a workflow that now waits. finish_waiting is row-locked and idempotent,
+            # so doing both is harmless, and it never calls the model or a tool.
+            await resume.finish_waiting(session, t.run_id)
         return response
 
     async def _escalate(self, session: AsyncSession, t: "_Turn") -> dict[str, Any]:
