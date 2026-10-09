@@ -1,9 +1,14 @@
 """GET /api/v1/workflows/{id}: the status of one chat turn (owner-only; 404 for everyone else).
 
-For a turn that is `waiting_approval` this call first runs `resume.sync_waiting`, which finishes the
-workflow if a person has decided the approval since. That is a write inside a GET; see the long
-comment in app/agent/resume.py for why it is safe (one idempotent, row-locked transition, no model
-call, only backend-written ids). Phase 5 replaces this polling with event-driven resume.
+For a turn that is `waiting_approval` this call first runs `resume.sync_waiting`: a FALLBACK that
+finishes the workflow if what it waits for is already final. Normally the resume consumer has done
+that already (a `refund.*` event); this keeps a stopped consumer from stranding a customer. That is
+a write inside a GET; see the long comment in app/agent/resume.py for why it is safe (one
+idempotent, row-locked transition, no model call, only backend-written ids).
+
+`waiting_for` says what a still-waiting turn waits for, computed by the backend from the approval
+and refund rows: "approval" (a human has not decided), "payout" (approved, the payout has not
+finished) or null (not waiting). The page only displays it.
 """
 
 import uuid
@@ -34,6 +39,7 @@ async def get_workflow(
         await resume.sync_waiting(session, workflow_id)
         run = await store.get_run(session, workflow_id, user_id)
         assert run is not None
+    waiting_for = await resume.waiting_for_run(session, run)
     response = dict(run.response or {})
     texts = await store.assistant_texts(session, workflow_id)
     out = {
@@ -47,6 +53,7 @@ async def get_workflow(
         "sources": response.get("sources", []),
         "llm": response.get("llm"),
         "waiting_for_approval": run.status == WorkflowStatus.waiting_approval,
+        "waiting_for": waiting_for,
     }
     await session.rollback()  # end the read transaction
     return out

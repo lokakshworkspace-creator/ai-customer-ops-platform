@@ -35,6 +35,12 @@ class WorkflowRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             unique=True,
             postgresql_where=text("status = 'running'"),
         ),
+        # The resume consumer finds the turn that waits for a refund by this key (migration 0005).
+        Index(
+            "ix_workflow_runs_waiting_refund",
+            text("(context ->> 'refund_id')"),
+            postgresql_where=text("status = 'waiting_approval'"),
+        ),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(

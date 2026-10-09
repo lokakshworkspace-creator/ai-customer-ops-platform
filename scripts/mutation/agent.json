@@ -81,11 +81,11 @@
   },
   {
     "id": "A11",
-    "desc": "sync finishes an already-finished workflow again (a second GET adds a second message)",
+    "desc": "finish_waiting (used by the sync fallback and the resume consumer) finishes an already-finished workflow again (a second GET adds a second message)",
     "file": "app/agent/resume.py",
     "old": "if run is None or run.status != WorkflowStatus.waiting_approval:",
     "new": "if run is None:",
-    "tests": "app/tests/test_agent_orchestrator.py"
+    "tests": "app/tests/test_agent_orchestrator.py app/tests/test_resume_workflow.py"
   },
   {
     "id": "A12",
