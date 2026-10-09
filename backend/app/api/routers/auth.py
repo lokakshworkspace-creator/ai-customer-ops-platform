@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_session
+from app.api.deps import CurrentUser, get_session
 from app.core.security import create_access_token
 from app.modules.users import service as users_service
 
@@ -36,3 +36,10 @@ async def login(
         )
     token, expires_in = create_access_token(user.id)
     return TokenResponse(access_token=token, expires_in=expires_in)
+
+
+@router.get("/me")
+async def me(user: CurrentUser) -> dict[str, str]:
+    """Who the caller is, read from the DATABASE (never from the token's claims). Used by the web
+    page to choose what to show; it is not an authority: every endpoint authorizes for itself."""
+    return {"id": str(user.id), "email": user.email, "role": user.role.value}

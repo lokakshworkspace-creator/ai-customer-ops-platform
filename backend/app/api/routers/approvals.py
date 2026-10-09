@@ -1,5 +1,8 @@
-"""Minimal admin endpoints so the approval state transitions are usable and testable.
-(The admin UI and the agent resume flow arrive in Phase 5.)"""
+"""Admin endpoints for approvals: the list (what the admin page shows) and approve / reject.
+
+The list is admin-only (403 for customers) and read-only. Approve and reject go through the SAME
+tool executor as everything else (authorization, the policy engine with its SELF_APPROVAL rule,
+locks, the tool_calls log); this module and the admin page decide nothing."""
 
 import uuid
 from typing import Annotated
@@ -13,7 +16,9 @@ from app.api.deps import CurrentUser, get_executor, get_session, require_role
 from app.api.tool_responses import tool_response
 from app.db.models import User
 from app.db.models.enums import ApprovalStatus, Role
+from app.modules.refunds import approvals_view
 from app.modules.refunds import repo as refunds_repo
+from app.policy.rules import get_rules
 from app.policy.types import Actor
 from app.tools.context import ToolContext
 from app.tools.executor import ToolExecutor
@@ -39,17 +44,7 @@ async def list_approvals(
         session, status=status, limit=limit, offset=offset
     )
     return {
-        "items": [
-            {
-                "id": str(a.id),
-                "refund_id": str(a.refund_id) if a.refund_id else None,
-                "status": a.status.value,
-                "requested_by": str(a.requested_by),
-                "payload": a.payload,
-                "created_at": a.created_at.isoformat(),
-            }
-            for a in rows
-        ],
+        "items": await approvals_view.admin_items(session, rows, get_rules()),
         "total": total,
         "limit": limit,
         "offset": offset,
