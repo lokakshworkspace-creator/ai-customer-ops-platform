@@ -5,6 +5,7 @@ import {
   ABORTED,
   ApiError,
   ChatResponse,
+  Source,
   ToolResult,
   getWorkflow,
   login,
@@ -75,6 +76,25 @@ function ToolChip({ r }: { r: ToolResult }) {
       {r.reason_code && <span className="font-mono text-slate-500">{r.reason_code}</span>}
       <span className="text-slate-700">{r.summary}</span>
     </li>
+  );
+}
+
+// The articles behind an answer, as the backend reported them. Display only.
+function SourceChips({ sources }: { sources: Source[] }) {
+  if (sources.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-xs" aria-label="Sources">
+      <span className="text-slate-500">Sources:</span>
+      {sources.map((s) => (
+        <span
+          key={s.document_id}
+          title={s.heading ?? s.title}
+          className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-sky-900"
+        >
+          {s.title}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -300,8 +320,8 @@ export default function Page() {
       <div className="flex-1 space-y-4 overflow-y-auto rounded border border-slate-200 bg-white p-3">
         {turns.length === 0 && (
           <p className="text-sm text-slate-500">
-            Try: “my order arrived damaged, refund me”. The assistant proposes; the shop’s backend
-            decides.
+            Try: “my order arrived damaged, refund me” or “how long does shipping take?”. The
+            assistant proposes; the shop’s backend decides.
           </p>
         )}
         {turns.map((t) => (
@@ -332,6 +352,7 @@ export default function Page() {
                 <div className="whitespace-pre-wrap rounded-lg bg-slate-100 px-3 py-2 text-sm">
                   {t.response.reply}
                 </div>
+                <SourceChips sources={t.response.sources ?? []} />
                 {t.response.tool_results.length > 0 && (
                   <ul className="space-y-1">
                     {t.response.tool_results.map((r) => (

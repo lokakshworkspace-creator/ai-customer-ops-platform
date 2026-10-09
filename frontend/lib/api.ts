@@ -10,6 +10,14 @@ export type ToolResult = {
   tool_call_id: string;
 };
 
+// A help article the answer was based on. Computed by the backend from what the search returned,
+// never taken from the model's wording.
+export type Source = {
+  document_id: string;
+  title: string;
+  heading: string | null;
+};
+
 export type ChatResponse = {
   conversation_id: string;
   workflow_id: string;
@@ -17,6 +25,7 @@ export type ChatResponse = {
   status: "completed" | "waiting_approval" | "escalated" | "failed" | "running";
   reply: string;
   tool_results: ToolResult[];
+  sources: Source[];
   llm: "fake" | "gemini";
 };
 
@@ -28,6 +37,7 @@ export type WorkflowView = {
   reply: string | null;
   latest_message: string | null;
   tool_results: ToolResult[];
+  sources: Source[];
   llm: "fake" | "gemini" | null;
   waiting_for_approval: boolean;
 };
