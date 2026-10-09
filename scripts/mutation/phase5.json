@@ -1,0 +1,74 @@
+[
+  {
+    "id": "P1",
+    "desc": "the admin role check is gone from GET /approvals (a customer can list approvals)",
+    "file": "app/api/routers/approvals.py",
+    "old": "_admin: Annotated[User, Depends(require_role(Role.admin))],",
+    "new": "_admin: Annotated[User, Depends(require_role(Role.admin, Role.customer))],",
+    "tests": "app/tests/test_admin_api.py app/tests/test_approvals_api.py"
+  },
+  {
+    "id": "P2",
+    "desc": "the admin role check is gone from the staff knowledge-base lookup (a customer can read internal documents)",
+    "file": "app/api/routers/admin.py",
+    "old": "admin: Annotated[User, Depends(require_role(Role.admin))],",
+    "new": "admin: Annotated[User, Depends(require_role(Role.admin, Role.customer))],",
+    "tests": "app/tests/test_staff_kb_search.py"
+  },
+  {
+    "id": "P3",
+    "desc": "audiences_for_role gives internal documents to every role",
+    "file": "app/rag/audience.py",
+    "old": "    if role == Role.admin:\n",
+    "new": "    if role is not None:\n",
+    "tests": "app/tests/test_staff_kb_search.py"
+  },
+  {
+    "id": "P4",
+    "desc": "a turn is finished while its approved refund is still processing (the payout rule is gone)",
+    "file": "app/agent/resume.py",
+    "old": "    if approval is None or refund is None or waiting_for(approval, refund) is not None:\n",
+    "new": "    if approval is None or refund is None:\n",
+    "tests": "app/tests/test_resume_workflow.py app/tests/test_resume_consumer.py app/tests/test_resume_race.py"
+  },
+  {
+    "id": "P5",
+    "desc": "the race closure is removed: a decision made during the final answer strands the turn",
+    "file": "app/agent/orchestrator.py",
+    "old": "            await resume.finish_waiting(session, t.run_id)\n",
+    "new": "            pass\n",
+    "tests": "app/tests/test_resume_race.py"
+  },
+  {
+    "id": "P6",
+    "desc": "a checkpoint that names another user's refund is trusted when finishing a turn",
+    "file": "app/agent/resume.py",
+    "old": "    if approval is None or refund is None or refund.requested_by != run.user_id:\n",
+    "new": "    if approval is None or refund is None:\n",
+    "tests": "app/tests/test_resume_workflow.py"
+  },
+  {
+    "id": "P7",
+    "desc": "the consumer ignores whom the event is about (another customer's event finishes the turn)",
+    "file": "app/events/consumers/resume.py",
+    "old": "        query = query.where(WorkflowRun.user_id == uuid.UUID(str(customer_id)))\n",
+    "new": "        pass\n",
+    "tests": "app/tests/test_resume_consumer.py"
+  },
+  {
+    "id": "P8",
+    "desc": "the consumer reacts to events that decide nothing (refund.requested finishes the turn)",
+    "file": "app/events/consumers/resume.py",
+    "old": "    if envelope.event_type not in RESUME_EVENTS:\n",
+    "new": "    if False:\n",
+    "tests": "app/tests/test_resume_consumer.py"
+  },
+  {
+    "id": "P9",
+    "desc": "the staff lookup embeds the question with a database transaction still open",
+    "file": "app/api/routers/admin.py",
+    "old": "    await session.rollback()\n    query = q.strip()\n",
+    "new": "    query = q.strip()\n",
+    "tests": "app/tests/test_staff_kb_search.py"
+  }
+]
