@@ -106,7 +106,7 @@ def _tokens(text: str) -> list[str]:
 
 class FakeEmbedder:
     name = "fake"
-    default_min_cosine = 0.25
+    default_min_cosine = 0.4  # fake vectors are lexical: stop words alone give ~0.3
     default_min_ts_rank = 0.05
 
     def __init__(self, dim: int = 768) -> None:
