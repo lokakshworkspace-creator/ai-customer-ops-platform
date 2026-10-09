@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ABORTED,
   ApiError,
   ChatResponse,
   Source,
@@ -11,42 +10,16 @@ import {
   login,
   sendChat,
 } from "../lib/api";
+import { isAborted, messageOf, tokenStore } from "../lib/auth";
 
 // This page contains NO business logic. It sends what the user typed and shows what the backend
 // returned: the reply, the tool outcomes (decided by the backend), and the waiting-for-approval
 // state. Whether something is allowed, denied or needs a human is never decided here.
 
-const TOKEN_KEY = "ops.token";
-const POLL_MS = 5000;
-
-// sessionStorage can throw (private windows, blocked site data): the page must still work.
-const tokenStore = {
-  get(): string | null {
-    try {
-      return sessionStorage.getItem(TOKEN_KEY);
-    } catch {
-      return null;
-    }
-  },
-  set(value: string): void {
-    try {
-      sessionStorage.setItem(TOKEN_KEY, value);
-    } catch {
-      /* the session just will not survive a reload */
-    }
-  },
-  clear(): void {
-    try {
-      sessionStorage.removeItem(TOKEN_KEY);
-    } catch {
-      /* nothing to clear */
-    }
-  },
-};
-
-const messageOf = (err: unknown, fallback: string): string =>
-  err instanceof Error && err.message ? err.message : fallback;
-const isAborted = (err: unknown): boolean => err instanceof ApiError && err.code === ABORTED;
+// While a turn waits for a human, ask the backend now and then. The consumer of the refund events
+// normally finishes the turn long before this fires, so the poll is only a safety net (the backend
+// also finishes it on read) and can be slow.
+const POLL_MS = 15000;
 
 type Turn = {
   key: string; // the client-generated message_id; resending it is safe (the server replays)
@@ -55,6 +28,7 @@ type Turn = {
   error?: string;
   response?: ChatResponse;
   resolved?: { status: string; message: string | null }; // set when a waiting turn is decided
+  waitingFor?: "approval" | "payout" | null; // what the backend says it still waits for
 };
 
 const STATUS_STYLE: Record<string, string> = {
@@ -240,6 +214,8 @@ export default function Page() {
           setPollNote(null);
           if (!w.waiting_for_approval) {
             update(t.key, { resolved: { status: w.status, message: w.latest_message } });
+          } else {
+            update(t.key, { waitingFor: w.waiting_for }); // shown as the backend reports it
           }
         }
       } catch (err) {
@@ -252,6 +228,7 @@ export default function Page() {
       }
     }
 
+    void poll(); // look once right away (the turn may already be final), then every POLL_MS
     const id = setInterval(() => {
       void poll();
     }, POLL_MS);
@@ -362,7 +339,10 @@ export default function Page() {
                 )}
                 {t.response.status === "waiting_approval" && !t.resolved && (
                   <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                    ⏳ Waiting for human approval. This page checks every few seconds.
+                    {t.waitingFor === "payout"
+                      ? "⏳ Approved, payout in progress."
+                      : "⏳ Waiting for human approval."}{" "}
+                    This page checks now and then.
                     {pollNote && <span className="mt-1 block text-xs">{pollNote}</span>}
                   </p>
                 )}
