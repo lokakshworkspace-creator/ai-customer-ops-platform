@@ -1,10 +1,11 @@
 # Architecture
 
-This document describes the system as designed (the target) and as built (Phases 0–3). Anything not yet built is marked **planned**. Diagrams use [Mermaid](https://mermaid.js.org/), which GitHub renders natively.
+This document describes the system as designed (the target) and as built (Phases 0–4). Anything not yet built is marked **planned**. Diagrams use [Mermaid](https://mermaid.js.org/), which GitHub renders natively.
 
 - [Target architecture](#target-architecture)
 - [The tool pipeline](#the-tool-pipeline)
 - [The agent](#the-agent)
+- [Retrieval: the knowledge base](#retrieval-the-knowledge-base)
 - [Request flows as implemented today](#request-flows-as-implemented-today)
 - [Concurrency and locking](#concurrency-and-locking)
 - [Data model](#data-model)
@@ -35,12 +36,13 @@ flowchart LR
         POL["Policy engine + rules.yaml: ALLOW, REQUIRE_APPROVAL, DENY"]:::built
         AGENT["Agent: orchestrator + state machine, tools view, derived keys"]:::built
         APPRUI["Approval UI"]:::planned
-        RAG["RAG: ingest, retriever, answerer"]:::planned
+        RAG["RAG: chunker, ingest, hybrid retriever (search_knowledge_base)"]:::built
     end
 
     LLM["LLM: Gemini over httpx, or the built-in fake"]:::built
-    PG[("PostgreSQL 16: 13 tables, source of truth")]:::built
-    VEC[("pgvector extension")]:::prov
+    PG[("PostgreSQL 16: 15 tables, source of truth")]:::built
+    VEC[("pgvector: kb_chunks vector(768), HNSW cosine + GIN full text")]:::built
+    EMB["Embedder: Gemini embeddings over httpx, or the built-in fake"]:::built
     RD[("Redis")]:::prov
     RELAY["Outbox relay (separate process)"]:::built
     CONS["Notification consumer (separate process)"]:::built
@@ -58,13 +60,14 @@ flowchart LR
     TOOLS --> POL
     POL -- "ALLOW" --> ORD
     POL -- "ALLOW" --> REF
+    POL -- "ALLOW (read)" --> RAG
     POL -- "ALLOW" --> TKT
     POL -- "REQUIRE_APPROVAL" --> REF
     TOOLS -- "tool_calls + audit_logs" --> PG
     TKT --> PG
     AGENT -- "workflow_runs checkpoints, messages" --> PG
-    AGENT -.-> RAG
-    RAG -.-> VEC
+    RAG -- "embed the question, after commit" --> EMB
+    RAG -- "audience-filtered SQL" --> VEC
     TOOLS -. "cache, rate limit, idempotency fast path" .-> RD
     PG -- "outbox_events" --> RELAY
     RELAY --> RP --> CONS
@@ -73,11 +76,11 @@ flowchart LR
 
 | Colour / line | Meaning |
 |---|---|
-| Green, solid | **Built** (Phases 0–3) |
-| Amber | **Provisioned, not yet used** — it runs in `docker-compose.yml` or is enabled in the migration, but no application code depends on it. Redis is only pinged by `/health`; the `vector` extension is enabled but there are no vector columns. |
-| Grey, dashed | **Planned** (Phases 4–7) |
+| Green, solid | **Built** (Phases 0–4) |
+| Amber | **Provisioned, not yet used** — it runs in `docker-compose.yml` or is enabled in the migration, but no application code depends on it. Redis is only pinged by `/health`. |
+| Grey, dashed | **Planned** (Phases 5–7) |
 
-The tools have two callers: the HTTP layer (the refund and approval endpoints) and the agent. Both call the same executor with the authenticated `Actor`; the agent's calls carry `origin="agent"`, which narrows what it may run (next section).
+The tools have two callers: the HTTP layer (the refund and approval endpoints) and the agent. Both call the same executor with the authenticated `Actor`; the agent's calls carry `origin="agent"`, which narrows what it may run (next section). The knowledge-base search is one more tool behind that executor: it is read-only, and it is not reachable over HTTP, only through the agent and the tests.
 
 ## The tool pipeline
 
@@ -129,7 +132,7 @@ flowchart TD
     X -- "error" --> F
 ```
 
-There is no separate classification call: the model either answers in text or proposes tools. Policy and FAQ questions are a stub until Phase 4 adds a search tool (the system prompt tells the model it cannot answer them); nothing in the machine changes when that tool arrives.
+There is no separate classification call: the model either answers in text or proposes tools. Policy and FAQ questions are answered by one more tool, `search_knowledge_base` (see [Retrieval](#retrieval-the-knowledge-base)); nothing in the machine changed when it arrived: it is an ordinary tool call in the `EXECUTE` state.
 
 ```mermaid
 sequenceDiagram
@@ -156,7 +159,7 @@ sequenceDiagram
             O->>DB: checkpoint state and context, store assistant and tool messages
         end
         O->>DB: store the reply, freeze the response on the workflow row, COMMIT
-        O-->>UI: reply, status, tool_results built by the backend, llm
+        O-->>UI: reply, status, tool_results and sources built by the backend, llm
     end
 ```
 
@@ -165,7 +168,7 @@ What keeps the agent inside the rules:
 * **The gate.** `ToolContext.origin` is `"agent"` for model proposals. The executor refuses any tool that is not `agent_visible` before it even reads the arguments (`TOOL_NOT_AVAILABLE`, logged as a denied call), for any actor: an administrator chatting with the assistant does not give the assistant `approve_refund`. The registry also refuses to register an admin-only tool as `agent_visible`, and the model is only shown `registry.agent_tools()`.
 * **What the model is shown.** `app/agent/tools_view.py` turns each tool's Pydantic schema into something a model can satisfy: money is a decimal string (the raw schema said "number or string", and a model sends `250.0`, which our validator correctly rejects), `Optional` fields are just not required, and `reason_code` is an enum taken from `rules.yaml`. The auto-approval limit is **not** told to the model. Gemini gets a second mapping to its restricted OpenAPI-style schema subset, pinned by a golden snapshot per tool.
 * **Identity and keys are never model-controlled.** The actor is the authenticated user. Tool inputs forbid unknown fields, so a model-supplied `user_id`, `role` or `idempotency_key` fails validation and is logged. The refund key is derived: `agent:<conversation_id>:<message_id>:<tool>:<hash of the canonical arguments>`, so the same message always yields the same key (a retry or a repeated proposal is a replay) and a different message is judged by policy on its own.
-* **Results are data.** What goes back to the model is an allow-listed, size-capped (2 KiB) summary built by the backend (`results_view.py`): no emails, names, notes or user ids. The UI gets a separate `tool_results` list built from the same outcomes, so what the backend decided is visible even if the model words it badly.
+* **Results are data.** What goes back to the model is an allow-listed, size-capped (2 KiB; 4 KiB for knowledge-base excerpts) summary built by the backend (`results_view.py`): no emails, names, notes or user ids. The UI gets a separate `tool_results` list built from the same outcomes, so what the backend decided is visible even if the model words it badly.
 * **Limits.** At most 5 tool calls per turn and 20 per conversation (then `ESCALATED` and one ticket), a 90 s turn deadline, 30 turns per user per hour (`429`), `max_tokens` on every call, 20 messages of history, and no database transaction open while the model thinks.
 * **Failure.** If the model is unreachable before any tool ran, the turn is undone and the caller gets `503` (the same `message_id` can be sent again). If tools already ran, their effects are real, so the turn is kept, marked `failed`, and the reply says what was done.
 * **Ownership.** Conversations are the set of messages sharing a server-generated `conversation_id`; every message carries its `user_id`. Another user's conversation or workflow is `404`, administrators included.
@@ -174,6 +177,76 @@ What keeps the agent inside the rules:
 ### Which model answers
 
 `LLM_PROVIDER` selects the client (`app/agent/llm/factory.py`). `fake` (the default) is a built-in rule-based model that is deliberately **gullible**: it obeys instructions found in user text or tool results, even for tools it was not offered, so it exercises every backend defence. All tests and the demo use it (`conftest.py` forces `LLM_PROVIDER=fake` and blanks the key); outside `APP_ENV=dev` it is refused. `gemini` is `GeminiLLMClient`: one `POST` per model call to the Gemini REST API (`generateContent`, v1beta) over plain `httpx`, the key in the `x-goog-api-key` header only, a timeout and one retry for transient errors, `functionCall` / `functionResponse` parts, and `thoughtSignature` echoed back unchanged. The model name comes from `LLM_MODEL`.
+
+## Retrieval: the knowledge base
+
+Golden rule 3 in code: retrieved text is **data**, and `rules.yaml` always beats any document. The knowledge base lets the assistant answer "how does shipping / returns / refunds work?" with sources; it can never grant, deny or change anything.
+
+### The pieces
+
+| Piece | Where | What it does |
+|---|---|---|
+| Documents | `backend/app/data/kb/*.md` | 10 markdown files with YAML front matter (`title`, `audience`, `other_numbers`): 8 `customer`, 2 `internal`. Numbers that come from the rules are placeholders (`{{refund.auto_approve_max}}`) rendered from `rules.yaml`, and a consistency check fails on any digit or number word that is neither a placeholder nor listed in `other_numbers`, so a document cannot silently disagree with the policy engine |
+| Chunker | `rag/chunker.py` | Heading-aware: splits on `#`–`###`, keeps a heading path (`Returns policy > Electronics`) with each chunk, never separates a heading from its first paragraph, keeps a list or table with the paragraph that introduces it, aims at about 300 estimated tokens, splits a long section between blocks (with a small overlap) and a long paragraph between sentences, and merges stub sections into a neighbour (token counts are estimates, words × 1.3, with no tokenizer dependency). 23 chunks for the 10 documents |
+| Embedder | `rag/embedder.py`, `rag/factory.py` | An `Embedder` interface with two implementations. `GeminiEmbedder`: plain `httpx` against `batchEmbedContents` (one text per item, 768 dimensions; `gemini-embedding-001` takes a task type, `gemini-embedding-2` takes the task as a text prefix; vectors are L2-normalised; paced and retried; the key is a `SecretStr` that never reaches a URL, log or error). `FakeEmbedder`: deterministic hashed word features, no network. The fake is the default, is refused outside `APP_ENV=dev`, and is forced by `conftest.py` |
+| Schema | migration `0004` | `kb_documents` (`namespace`+`source` unique, `audience` CHECK, `content_hash`, `embedding_model`) and `kb_chunks` (`embedding vector(768)` hard-coded, a generated `tsv` column, HNSW `vector_cosine_ops` index (m 16, ef_construction 64), GIN index on `tsv`, chunks deleted with their document). Hand-reviewed: exactly one named CHECK for the one enum column |
+| Ingest | `rag/ingest.py`, `scripts/kb_ingest.py` | Plan (read-only) then apply. Unchanged document = no-op (hash over the rendered text, title, audience, model, dimension and chunking version). A changed document is replaced in **one transaction** after its embeddings succeeded, so a rate limit mid-run leaves the old chunks serving. Call cap, orphan pruning, dry run by default |
+| Guards | `rag/guards.py` | `EMBEDDING_DIM` must equal the column width, and the namespace must hold chunks of the current model: otherwise a loud `KbDimensionMismatch` / `KbNotIndexed` / `KbConfigError` instead of an empty answer |
+| Retriever | `rag/retriever.py` | Pure: a query vector and text in, chunks out. See below |
+| Tool | `tools/handlers/knowledge.py` | `search_knowledge_base(query)`: read-only, `agent_visible`, roles customer and admin, policy outcome `READ_ALLOWED` |
+| Results for the model | `agent/results_view.py` | Allow-listed excerpts, delimiter-wrapped, capped; plus `sources_of()` for the UI |
+| Eval | `rag/eval.py`, `scripts/kb_eval.py`, `data/kb_eval/golden.yaml` | 25 golden questions and 5 out-of-scope ones |
+
+### Ingest and a question
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant M as LLM (proposes)
+    participant O as orchestrator
+    participant X as tool executor
+    participant H as knowledge handler
+    participant E as embedder
+    participant DB as PostgreSQL
+
+    M-->>O: proposes search_knowledge_base(query)
+    O->>X: run, origin agent, derived key
+    X->>DB: log start (tool_calls), commit
+    X->>X: validate (extra fields such as audience are rejected), authorize, policy READ_ALLOWED
+    X->>DB: execute: record the call, COMMIT (nothing held open)
+    X->>H: after_commit hook
+    H->>E: embed the question (HTTP, no transaction open)
+    H->>DB: guards (dimension, model), then ONE search: vector + full text, fused, thresholded, audience customer only
+    H-->>X: found, results (title, heading, content, ids)
+    X->>DB: finish the tool_calls row, COMMIT
+    X-->>O: outcome
+    O-->>M: allow-listed, delimiter-wrapped excerpts, at most 4 KiB, labelled as data
+    O->>O: sources = documents of the results (computed by the backend)
+```
+
+### The search
+
+* **Two legs.** Vector: cosine distance on the HNSW index (`SET LOCAL hnsw.iterative_scan = relaxed_order`, so a filtered scan does not run dry). Keyword: Postgres full text (`to_tsquery('english', …)` of the question's alphanumeric words, OR-ed, ranked with `ts_rank_cd`). Each leg takes a pool of 20. The query text only ever reaches the database as a bound parameter, and the tsquery is built from `[a-z0-9]` terms only.
+* **Fusion.** Reciprocal Rank Fusion, `1/(60 + rank)` summed over the legs. Ties are broken by document source and chunk position, never by a random id, so a ranking is the same after a re-ingest (a test pins it).
+* **"Nothing relevant" is decided on absolute scores.** RRF only ranks, so a chunk is returned only if its cosine is at least `min_cosine` **or** its keyword rank is at least `min_ts_rank`. At most 4 chunks come back. Defaults: `min_ts_rank` 0.12 (Postgres full text, the same for every embedder), `min_cosine` 0.58 for `gemini-embedding-001`, 0.64 for `gemini-embedding-2` and 0.4 for the fake. They sit halfway between the lowest best score of an in-scope question and the highest best score of an out-of-scope one **on the 30 golden questions, which are also the questions used to measure them** (gaps: about 0.02 cosine for both models, 0.167 against 0.091 for full text). They are a starting point, not an out-of-sample result.
+* **The filters are in the SQL.** `d.audience = ANY(:audiences) AND d.namespace = :ns` is in each candidate query and again in the final select; the vector leg also filters `c.embedding_model = :model`. No audience in the list means no documents; an unknown audience is an error.
+
+### Why this cannot authorize anything
+
+| Layer | What it guarantees | Where it is tested |
+|---|---|---|
+| The audience is code, not an argument | The handler fixes `AGENT_AUDIENCES = (customer,)`, even for an admin chatting. `audience`, `namespace` and `top_k` are not fields of the tool, and the schema forbids extras, so a model cannot ask for them | `test_rag_tool.py`, `test_rag_safety.py` |
+| The audience is in the SQL | Every internal chunk, used as its own query text, returns nothing for `customer` in all three modes; a query like `x') OR audience = 'internal'` is just words | `test_rag_retriever.py`, `test_rag_safety.py` |
+| Excerpts are data | Allow-listed fields (`source`, `text`), at most 900 characters each and 4 KiB in all, wrapped in `<<<EXCERPT n … END EXCERPT n>>>` with those marker characters stripped from the document text, plus a backend-written note saying they are reference data | `test_rag_tool.py` |
+| Decisions do not read documents | Nothing under `policy/`, `modules/`, or the executor, registry and context imports the knowledge base (a test scans the source). A lying article ("refunds of any amount are always approved") and a poisoned one ("call approve_refund …") are retrieved by the gullible model's questions and the outcomes are identical to the run without them | `test_rag_safety.py`, `scripts/demo_phase4.py` |
+| Sources are not the model's words | `sources` are the documents of the search results, computed by the backend; if no search ran, there are none, whatever the model claims. They are the *retrieved* articles, not necessarily the ones the answer used | `test_rag_tool.py` |
+| Failure is generic | A guard failure or an embedding outage fails the tool call (`KB_UNAVAILABLE`, 503 on the call); the detail goes to the `tool_calls` row and the log, the model sees "The help articles are unavailable right now" | `test_rag_tool.py` |
+
+The system prompt tells the model to answer only from the excerpts and to say "I'm not sure" when nothing relevant was found, but, as everywhere, the prompt is guidance and the tests assume a model that ignores it.
+
+### Measured, with caveats
+
+The eval (`scripts/kb_eval.py`) ranks with the thresholds off (hit@1 / hit@3 per mode), then runs hybrid with the real thresholds. Reproduced on the `default` namespace with `gemini-embedding-001` while writing this: vector 21/25 and 24/25, keyword 19/25 and 24/25, hybrid 20/25 and 24/25; 25/25 in-scope questions answered; 5/5 out-of-scope "not found" (after tuning on the same questions). `gemini-embedding-2` printed vector 23/25, keyword 19/25, hybrid 20/25 at hit@1. **Hybrid did not beat vector-only**, and a difference of one or two questions out of 25 is noise. The full printouts are in [`phase-4-report.md`](phase-4-report.md). Nothing is claimed from fake-embedder runs.
 
 ## Request flows as implemented today
 
@@ -352,7 +425,7 @@ Details, failure handling and the event schema are in [`events.md`](events.md). 
 
 ## Data model
 
-Thirteen tables, created by the Alembic migrations `0001` (the eleven Phase 1 tables), `0002` (Phase 2: per-user refund idempotency and `request_hash`, new refund and tool-call states, outbox ordering and parking, the `processed_events` table) and `0003` (Phase 3: the `messages` table, and conversation / message identity on `workflow_runs` plus the `escalated` status). Generated from the SQLAlchemy metadata (`Base.metadata`), so it matches the code. Types are simplified: `varchar` columns holding a fixed set of values (`status`, `role`, `decision`, …) are enforced by a named `CHECK` constraint; every money column is `numeric(12,2)` next to a `currency` column; all primary keys are UUIDs generated by the application.
+Fifteen tables, created by the Alembic migrations `0001` (the eleven Phase 1 tables), `0002` (Phase 2: per-user refund idempotency and `request_hash`, new refund and tool-call states, outbox ordering and parking, the `processed_events` table), `0003` (Phase 3: the `messages` table, and conversation / message identity on `workflow_runs` plus the `escalated` status) and `0004` (Phase 4: `kb_documents` and `kb_chunks`). Generated from the SQLAlchemy metadata (`Base.metadata`), so it matches the code. Types are simplified: `varchar` columns holding a fixed set of values (`status`, `role`, `decision`, …) are enforced by a named `CHECK` constraint; every money column is `numeric(12,2)` next to a `currency` column; all primary keys are UUIDs generated by the application.
 
 ```mermaid
 erDiagram
@@ -383,6 +456,29 @@ erDiagram
         jsonb details
         varchar request_id
         timestamptz created_at
+        uuid id PK
+    }
+    kb_chunks {
+        uuid document_id FK
+        int ordinal
+        text heading
+        text content
+        vector embedding
+        tsvector tsv
+        varchar embedding_model
+        int token_count
+        uuid id PK
+    }
+    kb_documents {
+        varchar namespace
+        varchar source
+        varchar title
+        varchar audience
+        int version
+        varchar content_hash
+        varchar embedding_model
+        timestamptz created_at
+        timestamptz updated_at
         uuid id PK
     }
     messages {
@@ -513,6 +609,7 @@ erDiagram
         timestamptz updated_at
     }
 
+    kb_documents ||--o{ kb_chunks : "document_id"
     orders |o--o{ tickets : "order_id"
     orders ||--o{ order_items : "order_id"
     orders ||--o{ payments : "order_id"
@@ -548,6 +645,7 @@ Which tables application code uses today:
 | `tickets` | Written by the `create_ticket` tool (no HTTP route yet) |
 | `workflow_runs` | One row per chat turn: state and context (the checkpoint), conversation and message ids, the frozen response; written and read by the orchestrator and `GET /workflows/{id}` |
 | `messages` | The chat transcript (user, assistant and tool messages as JSON blocks); written by the orchestrator, read to build the model's history |
+| `kb_documents`, `kb_chunks` | The knowledge base: written only by `scripts/kb_ingest.py`, read by the `search_knowledge_base` tool's SQL. Not touched by any request handler or by policy code |
 
 Constraints that carry weight:
 
@@ -558,6 +656,7 @@ Constraints that carry weight:
 * `processed_events`: primary key `(consumer, event_id)`, which makes a duplicate delivery a no-op.
 * `workflow_runs`: `UNIQUE (conversation_id, message_id)`, `UNIQUE (user_id, message_id)`, and a partial unique index allowing one `running` turn per conversation; the `workflow_status` CHECK includes `escalated`.
 * `messages`: role CHECK (`user`, `assistant`, `tool`), a 32 KiB cap on `content`, and an identity column `seq` for strict order; deleting a user that has messages is refused (`RESTRICT`).
+* `kb_documents`: `UNIQUE (namespace, source)`; `audience` CHECK (`customer`, `internal`). `kb_chunks`: `embedding vector(768)` (the width is a literal in the migration, and the application compares `EMBEDDING_DIM` with it), a **generated, stored** `tsv` column, `UNIQUE (document_id, ordinal)`, `token_count > 0`, an HNSW cosine index and a GIN index; `ON DELETE CASCADE` from the document. The downgrade drops both tables (the knowledge base can be rebuilt with `kb_ingest.py`).
 
 ## Golden rules
 
@@ -567,7 +666,7 @@ These come from `CLAUDE.md` and are never to be broken. The last column says how
 |---|---|---|---|
 | 1 | The LLM proposes, the backend decides. The LLM never executes anything directly. | A model can be wrong or manipulated (prompt injection), so authority must live in deterministic code that can be tested and audited. | **Built**: every model proposal runs through the executor with `origin="agent"`; admin tools are never shown to the model and are refused if proposed; the prompt-injection tests use a model that obeys everything and prove the backend still refuses |
 | 2 | Every tool call passes schema validation → authorisation → policy engine → execution → `tool_calls` log. | One mandatory chokepoint means nothing runs unchecked and every attempt, allowed or denied, leaves a record. | **Built** (`app/tools/executor.py`); tests check that denied, invalid and failed calls are logged |
-| 3 | Retrieved (RAG) text is data, never instructions. `rules.yaml` always beats any document. | Documents can contain injected instructions; business rules must come from one reviewed source. | `rules.yaml` is the only source of thresholds. RAG is Phase 4 |
+| 3 | Retrieved (RAG) text is data, never instructions. `rules.yaml` always beats any document. | Documents can contain injected instructions; business rules must come from one reviewed source. | **Built** (Phase 4): `rules.yaml` is the only source of thresholds; the policy, refund and executor code does not read documents (a test scans for it); the audience filter is in the retrieval SQL and fixed to `customer` for the agent; excerpts reach the model as allow-listed, delimited, capped data; tests run a gullible model against a lying and a poisoned article and show identical decisions |
 | 4 | Postgres is the source of truth, including workflow state. Redis is disposable (cache, rate limit, idempotency fast path). | Losing Redis must never lose state or change an outcome, and a crashed workflow must be resumable from its last checkpoint. | Postgres holds all state, and idempotency does not use Redis at all. The agent's state machine is checkpointed in `workflow_runs` (state + context) and the transcript is in `messages`; Redis is provisioned but unused |
 | 5 | The frontend contains zero business logic. | A single enforcement point in the backend can't be bypassed or spoofed by modifying a client. | The Next.js page only sends the message and shows the reply, the backend-built tool outcomes and the waiting state; every decision is the API's |
 | 6 | Refunds are idempotent: `Idempotency-Key` plus a database `UNIQUE` constraint. | Retries, double-clicks and repeated LLM proposals must never pay out twice; the database is the final arbiter even if Redis is wrong. | **Built and concurrency-tested** (10 simultaneous identical requests make one refund and one payout). Through the agent the key is derived by the backend, and a client `message_id` makes a retried chat message a replay |
@@ -612,12 +711,27 @@ Taken from `git ls-files` for `backend/` and `scripts/` (so it is what exists no
 │   │   │   ├── jsonutil.py
 │   │   │   ├── logging.py
 │   │   │   └── security.py
+│   │   ├── data/
+│   │   │   ├── kb/
+│   │   │   │   ├── cancellations.md
+│   │   │   │   ├── contact-and-support.md
+│   │   │   │   ├── damaged-or-wrong-items.md
+│   │   │   │   ├── internal-agent-playbook.md
+│   │   │   │   ├── internal-fraud-and-escalation-notes.md
+│   │   │   │   ├── payments.md
+│   │   │   │   ├── refunds.md
+│   │   │   │   ├── returns-policy.md
+│   │   │   │   ├── shipping.md
+│   │   │   │   └── warranty.md
+│   │   │   └── kb_eval/
+│   │   │       └── golden.yaml
 │   │   ├── db/
 │   │   │   ├── migrations/
 │   │   │   │   ├── versions/
 │   │   │   │   │   ├── 0001_initial_schema.py
 │   │   │   │   │   ├── 0002_phase2_refunds_outbox_policy.py
-│   │   │   │   │   └── 0003_agent_messages_workflow.py
+│   │   │   │   │   ├── 0003_agent_messages_workflow.py
+│   │   │   │   │   └── 0004_knowledge_base.py
 │   │   │   │   ├── README
 │   │   │   │   ├── env.py
 │   │   │   │   └── script.py.mako
@@ -625,6 +739,7 @@ Taken from `git ls-files` for `backend/` and `scripts/` (so it is what exists no
 │   │   │   │   ├── approval.py
 │   │   │   │   ├── audit_log.py
 │   │   │   │   ├── enums.py
+│   │   │   │   ├── kb.py
 │   │   │   │   ├── message.py
 │   │   │   │   ├── order.py
 │   │   │   │   ├── outbox.py
@@ -637,7 +752,8 @@ Taken from `git ls-files` for `backend/` and `scripts/` (so it is what exists no
 │   │   │   │   └── workflow.py
 │   │   │   ├── base.py
 │   │   │   ├── locking.py
-│   │   │   └── session.py
+│   │   │   ├── session.py
+│   │   │   └── vector.py
 │   │   ├── events/
 │   │   │   ├── consumers/
 │   │   │   │   ├── base.py
@@ -671,9 +787,19 @@ Taken from `git ls-files` for `backend/` and `scripts/` (so it is what exists no
 │   │   │   ├── rules.py
 │   │   │   ├── rules.yaml
 │   │   │   └── types.py
+│   │   ├── rag/
+│   │   │   ├── chunker.py
+│   │   │   ├── embedder.py
+│   │   │   ├── eval.py
+│   │   │   ├── factory.py
+│   │   │   ├── guards.py
+│   │   │   ├── ingest.py
+│   │   │   ├── kb.py
+│   │   │   └── retriever.py
 │   │   ├── tools/
 │   │   │   ├── handlers/
 │   │   │   │   ├── base.py
+│   │   │   │   ├── knowledge.py
 │   │   │   │   ├── orders.py
 │   │   │   │   ├── refunds.py
 │   │   │   │   └── tickets.py
@@ -694,11 +820,15 @@ Taken from `git ls-files` for `backend/` and `scripts/` (so it is what exists no
     │   ├── commit3.json
     │   ├── commit4.json
     │   ├── commit5.json
+    │   ├── rag.json
     │   └── run.py
     ├── demo_cleanup.py
     ├── demo_phase2.py
     ├── demo_phase3.py
+    ├── demo_phase4.py
     ├── kafka_smoke.py
+    ├── kb_eval.py
+    ├── kb_ingest.py
     ├── llm_smoke.py
     ├── outbox_admin.py
     ├── reconcile_refunds.py
@@ -716,17 +846,19 @@ Taken from `git ls-files` for `backend/` and `scripts/` (so it is what exists no
 | `app/core/security.py`, `jsonutil.py`, `logging.py` | argon2 and JWT (HS256 pinned); JSON-safe/capped serialisation; structlog |
 | `app/db/base.py`, `session.py`, `locking.py` | Declarative base and mixins; async engine and session; the row-lock helpers and **the** lock order |
 | `app/db/models/` | One file per aggregate, plus `enums.py` (VARCHAR + CHECK enums) |
-| `app/db/migrations/` | Async Alembic environment; `0001` initial schema (includes `CREATE EXTENSION vector`), `0002` Phase 2 schema, `0003` Phase 3 schema |
+| `app/db/migrations/` | Async Alembic environment; `0001` initial schema (includes `CREATE EXTENSION vector`), `0002` Phase 2 schema, `0003` Phase 3 schema, `0004` the knowledge base |
+| `app/db/vector.py` | The pgvector column type and `vector_literal()` (no extra dependency) |
 | `app/policy/` | `engine.py` (pure decision functions), `rules.py` (loading and validation), `types.py`, `rules.yaml` (all thresholds) |
-| `app/tools/` | `registry.py` (specs, roles, `agent_visible`), `schemas.py` (inputs), `executor.py` (the pipeline), `context.py`, `default.py` (the default registry), `handlers/` (orders, tickets, refunds) |
+| `app/tools/` | `registry.py` (specs, roles, `agent_visible`), `schemas.py` (inputs), `executor.py` (the pipeline), `context.py`, `default.py` (the default registry), `handlers/` (orders, tickets, refunds, knowledge) |
 | `app/agent/` | `orchestrator.py` (a turn: the tool loop, caps, replay, failure handling), `fsm.py` (states and legal transitions), `keys.py` (derived idempotency keys), `tools_view.py` (what the model sees, plus the Gemini schema mapping), `results_view.py` (allow-listed, capped tool results), `history.py`, `prompts.py`, `store.py` (messages and checkpoints), `resume.py` (the approval sync stub), `llm/` (`base.py` interface, `gemini.py`, `fake.py`, `factory.py`) |
+| `app/rag/` | `embedder.py` (interface, fake, Gemini), `factory.py`, `kb.py` (load and render documents, the number-consistency check), `chunker.py`, `ingest.py`, `retriever.py`, `guards.py`, `eval.py`; the data is in `app/data/kb/` and `app/data/kb_eval/` |
 | `app/modules/orders/`, `users/`, `tickets/` | Service and repo layers. Authorisation scoping lives in the orders repo/service |
 | `app/modules/refunds/` | `service.py` (facts, events), `repo.py` (idempotent insert), `hashing.py` (canonical request hash), `payments.py` (provider interface, simulated provider, payout phases), `reconcile.py` |
 | `app/modules/audit.py` | Writes `audit_logs` rows |
 | `app/events/` | `outbox.py` (writer, field allow-list), `envelope.py` (version 1), `relay.py`, `consumers/` (base class + notifications), `kafka.py` (producer and consumer wrappers), `runtime.py` (signals, `--once` deadline), `admin.py` (unpark), `types.py` |
-| `scripts/` | `seed.py`; `demo_phase2.py`, `demo_phase3.py` and `demo_cleanup.py` (dev only); `reconcile_refunds.py`, `outbox_admin.py`, `kafka_smoke.py`, `llm_smoke.py` (two real calls to Gemini with your own key); `mutation/` (runner and six lists, 76 mutations) |
+| `scripts/` | `seed.py`; `demo_phase2.py`, `demo_phase3.py`, `demo_phase4.py` and `demo_cleanup.py` (dev only); `kb_ingest.py` and `kb_eval.py` (the knowledge base); `reconcile_refunds.py`, `outbox_admin.py`, `kafka_smoke.py`, `llm_smoke.py` (two real calls to Gemini with your own key); `mutation/` (runner and seven lists, 84 mutations) |
 | `frontend/` | Next.js 16.4.0, React 19.3.0, TypeScript 7.0.2, Tailwind: one page (login and chat), a same-origin proxy to the API (no CORS), an error boundary; no business logic |
 
-Tests are in `backend/app/tests/`: **874 tests** (`pytest --collect-only -q`) in 43 test files, plus shared helpers (`conftest.py` with the real-Postgres fixtures and the `committed_db` fixture for concurrency tests, `factories.py`, `tokens.py`, `policy_helpers.py`, `event_helpers.py`, `worlds.py` for building a customer/admin/order scenario, `agent_helpers.py` for an orchestrator wired to the real executor, and a golden snapshot of the Gemini tool declarations). 28 of them use the real Redpanda and carry the `kafka` marker; `pytest -m "not kafka"` runs the other 846 with Postgres only.
+Tests are in `backend/app/tests/`: **1063 tests** (`pytest --collect-only -q`) in 51 test files, plus shared helpers (`conftest.py` with the real-Postgres fixtures and the `committed_db` fixture for concurrency tests, `factories.py`, `tokens.py`, `policy_helpers.py`, `event_helpers.py`, `worlds.py` for building a customer/admin/order scenario, `agent_helpers.py` for an orchestrator wired to the real executor, and a golden snapshot of the Gemini tool declarations). 28 of them use the real Redpanda and carry the `kafka` marker; `pytest -m "not kafka"` runs the other 1035 with Postgres only.
 
-**Planned but not created yet** (from the layout in `CLAUDE.md`): `app/rag/` (Phase 4), an admin approvals page and event-driven resume (Phase 5).
+**Planned but not created yet:** an admin approvals page and event-driven resume (Phase 5). `CLAUDE.md` lists `answerer` under `rag/`; there is none, because the assistant model writes the answer from the retrieved excerpts.
