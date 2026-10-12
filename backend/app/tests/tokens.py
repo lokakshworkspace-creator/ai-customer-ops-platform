@@ -17,10 +17,14 @@ def forge_token(
     algorithm: str = "HS256",
     expires_in: timedelta | None = timedelta(minutes=5),
     extra: dict[str, Any] | None = None,
+    jti: str | None = "",
 ) -> str:
-    """Build a JWT. `sub=None` / `expires_in=None` omit that claim entirely."""
+    """Build a JWT. `sub=None` / `expires_in=None` / `jti=None` omit that claim entirely; the
+    default `jti` is a fresh unique one."""
     now = datetime.now(UTC)
     payload: dict[str, Any] = {"iat": now}
+    if jti is not None:
+        payload["jti"] = jti or uuid.uuid4().hex
     if sub is not None:
         payload["sub"] = str(sub)
     if expires_in is not None:

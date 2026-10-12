@@ -9,6 +9,7 @@ from app.db.models.outbox import OutboxEvent
 from app.db.models.payment import Payment
 from app.db.models.processed_event import ProcessedEvent
 from app.db.models.refund import Refund
+from app.db.models.revoked_token import RevokedToken
 from app.db.models.ticket import Ticket
 from app.db.models.tool_call import ToolCall
 from app.db.models.user import User
@@ -26,6 +27,7 @@ __all__ = [
     "Payment",
     "ProcessedEvent",
     "Refund",
+    "RevokedToken",
     "Ticket",
     "ToolCall",
     "User",

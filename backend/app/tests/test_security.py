@@ -25,7 +25,7 @@ def test_token_roundtrip_and_expiry() -> None:
     assert decode_access_token(token) == USER_ID
 
     claims = jwt.decode(token, options={"verify_signature": False})
-    assert set(claims) == {"sub", "iat", "exp"}  # identity only: no role in the token
+    assert set(claims) == {"sub", "jti", "iat", "exp"}  # identity only: no role in the token
     exp = datetime.fromtimestamp(claims["exp"], UTC)
     assert before + timedelta(minutes=30) <= exp <= before + timedelta(minutes=30, seconds=5)
     assert jwt.get_unverified_header(token)["alg"] == "HS256"
@@ -62,7 +62,7 @@ def test_tampered_payload_is_rejected() -> None:
 
 def test_secret_comes_from_settings() -> None:
     token = jwt.encode(
-        {"sub": str(USER_ID), "exp": datetime.now(UTC) + timedelta(minutes=1)},
+        {"sub": str(USER_ID), "jti": "abc", "exp": datetime.now(UTC) + timedelta(minutes=1)},
         get_settings().jwt_secret,
         algorithm="HS256",
     )

@@ -12,11 +12,12 @@ from app.agent.llm.factory import get_llm_client
 from app.agent.orchestrator import Orchestrator
 from app.core.config import get_settings
 from app.core.login_limiter import LoginLimiter
-from app.core.security import InvalidTokenError, decode_access_token
+from app.core.security import InvalidTokenError, TokenClaims, decode_token
 from app.db.models import User
 from app.db.models.enums import Role
 from app.db.session import get_session
 from app.modules.users import repo as users_repo
+from app.modules.users import tokens as users_tokens
 from app.policy.rules import get_rules
 from app.tools.default import build_default_registry
 from app.tools.executor import ToolExecutor
@@ -28,6 +29,7 @@ __all__ = [
     "get_login_limiter",
     "get_orchestrator",
     "close_redis",
+    "get_current_token",
     "get_current_user",
     "get_redis",
     "get_session",
@@ -72,8 +74,26 @@ def _unauthenticated() -> HTTPException:
     )
 
 
-async def get_current_user(
+async def get_current_token(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> TokenClaims:
+    """The validated, NOT revoked claims of the bearer token. Signature, algorithm and expiry are
+    checked first; then the `revoked_tokens` table (logout), in Postgres, so a revoked token is
+    refused by every endpoint that authenticates, whatever Redis is doing."""
+    if credentials is None:
+        raise _unauthenticated()
+    try:
+        claims = decode_token(credentials.credentials)
+    except InvalidTokenError:
+        raise _unauthenticated() from None
+    if await users_tokens.is_revoked(session, claims.jti):
+        raise _unauthenticated()
+    return claims
+
+
+async def get_current_user(
+    claims: Annotated[TokenClaims, Depends(get_current_token)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> User:
     """Authenticate the request from its bearer token.
@@ -82,14 +102,7 @@ async def get_current_user(
     every request, so deactivation, deletion and role changes take effect immediately, and
     the role used for authorisation always comes from the database, never from the token.
     """
-    if credentials is None:
-        raise _unauthenticated()
-    try:
-        user_id = decode_access_token(credentials.credentials)
-    except InvalidTokenError:
-        raise _unauthenticated() from None
-
-    user = await users_repo.get_by_id(session, user_id)
+    user = await users_repo.get_by_id(session, claims.user_id)
     if user is None or not user.is_active:
         raise _unauthenticated()
     return user

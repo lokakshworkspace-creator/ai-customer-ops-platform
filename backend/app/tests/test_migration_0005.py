@@ -2,7 +2,6 @@
 
 import asyncio
 
-import pytest
 from alembic import command
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -56,10 +55,9 @@ async def test_downgrade_drops_the_index_and_upgrade_restores_it(engine: AsyncEn
         await rebuild_schema(engine)
 
 
-@pytest.mark.parametrize("revision", ["0005"])
-def test_the_revision_chain_is_linear(revision: str) -> None:
+def test_the_revision_chain_is_linear() -> None:
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory.from_config(_alembic_config(_test_db_url()))
-    assert script.get_heads() == [revision]
-    assert script.get_revision(revision).down_revision == "0004"
+    assert len(script.get_heads()) == 1  # no branches
+    assert script.get_revision("0005").down_revision == "0004"
