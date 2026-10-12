@@ -11,6 +11,7 @@ from app.agent.llm.base import LLMClient, LLMConfigError
 from app.agent.llm.factory import get_llm_client
 from app.agent.orchestrator import Orchestrator
 from app.core.config import get_settings
+from app.core.login_limiter import LoginLimiter
 from app.core.security import InvalidTokenError, decode_access_token
 from app.db.models import User
 from app.db.models.enums import Role
@@ -24,6 +25,7 @@ __all__ = [
     "CurrentUser",
     "get_executor",
     "get_llm",
+    "get_login_limiter",
     "get_orchestrator",
     "close_redis",
     "get_current_user",
@@ -44,6 +46,17 @@ def get_redis() -> Redis:
 
 async def close_redis() -> None:
     await _redis_client().aclose()
+
+
+def get_login_limiter(redis: Annotated[Redis, Depends(get_redis)]) -> LoginLimiter:
+    """The login rate limiter over the process-wide Redis client (tests override this)."""
+    s = get_settings()
+    return LoginLimiter(
+        redis,
+        max_failures=s.login_max_failures,
+        window_s=s.login_window_seconds,
+        timeout_s=s.login_limiter_timeout_s,
+    )
 
 
 _bearer = HTTPBearer(auto_error=False)

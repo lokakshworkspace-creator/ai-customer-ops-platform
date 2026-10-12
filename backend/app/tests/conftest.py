@@ -1,5 +1,6 @@
 import asyncio
 import os
+import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,6 +10,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
+from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import (
@@ -28,8 +30,9 @@ os.environ["LLM_MODEL"] = ""
 os.environ["EMBEDDING_PROVIDER"] = "fake"
 os.environ["EMBEDDING_MODEL"] = ""
 
-from app.api.deps import get_executor, get_session
+from app.api.deps import get_executor, get_login_limiter, get_session
 from app.core.config import get_settings
+from app.core.login_limiter import LoginLimiter
 from app.db.base import Base
 from app.main import app
 from app.modules.refunds.payments import SimulatedPaymentProvider
@@ -127,6 +130,28 @@ async def db_session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
         finally:
             await session.close()
             await outer.rollback()
+
+
+@pytest.fixture(autouse=True)
+async def login_limiter() -> AsyncIterator[LoginLimiter]:
+    """Every test gets its own login limiter over its own Redis client and its own key prefix, so
+    failed logins never leak from one test to another (the app's cached Redis client belongs to one
+    event loop and tests each have their own). If Redis is down the limiter fails open, so tests
+    that do not care about it still pass; the limiter's own tests need Redis."""
+    redis = Redis.from_url(get_settings().redis_url, decode_responses=True)
+    prefix = f"test:{uuid.uuid4().hex}:"
+    limiter = LoginLimiter(redis, max_failures=5, window_s=900, prefix=prefix)
+    app.dependency_overrides[get_login_limiter] = lambda: limiter
+    yield limiter
+    try:
+        async with asyncio.timeout(2):
+            keys = [k async for k in redis.scan_iter(match=f"{prefix}*")]
+            if keys:
+                await redis.delete(*keys)
+    except Exception:
+        pass
+    app.dependency_overrides.pop(get_login_limiter, None)
+    await redis.aclose()
 
 
 @pytest.fixture

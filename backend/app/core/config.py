@@ -101,6 +101,19 @@ class Settings(BaseSettings):
     jwt_secret: str = DEV_JWT_SECRET
     jwt_expire_minutes: int = 30
 
+    # Login rate limiting (Redis). Failed logins are counted per email + client IP; after
+    # `login_max_failures` inside `login_window_seconds` the pair is blocked (429 + Retry-After)
+    # until the window that began at the first failure ends. If Redis is unreachable the limiter
+    # FAILS OPEN (login keeps working, a warning is logged): see app/core/login_limiter.py.
+    login_max_failures: int = Field(5, ge=1)
+    login_window_seconds: int = Field(900, ge=1)
+    login_limiter_timeout_s: float = Field(0.5, gt=0)
+    # How many reverse proxies in front of the API append to X-Forwarded-For. 0 (the default)
+    # means "do not read the header; use the socket peer". Behind the Next.js proxy of the dev
+    # setup the peer is always 127.0.0.1, so set this to 1 there. The entry that many hops from
+    # the RIGHT is used: the left side of the header is client-controlled and is never trusted.
+    trusted_proxy_hops: int = Field(0, ge=0)
+
     @field_validator("gemini_api_key", "llm_model", "embedding_model", mode="before")
     @classmethod
     def _blank_means_unset(cls, v: object) -> object:
