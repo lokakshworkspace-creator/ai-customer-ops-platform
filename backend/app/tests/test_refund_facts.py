@@ -94,6 +94,7 @@ async def test_velocity_counts_pending_processing_succeeded_but_not_rejected_or_
         (S.succeeded, True),
         (S.failed, False),
         (S.rejected, False),
+        (S.expired, False),  # Phase 6: nobody decided, nothing was paid, nothing is held
     ],
 )
 async def test_each_status_individually_against_the_default_rules(
@@ -119,12 +120,9 @@ async def test_which_statuses_count_is_configuration(db_session) -> None:
     since = NOW - timedelta(days=30)
     everything = make_rules(**{"refund.velocity_counted_statuses": [s.value for s in ALL]})
     only_succeeded = make_rules(**{"refund.velocity_counted_statuses": ["succeeded"]})
-    assert (
-        await repo.recent_count(
-            db_session, customer.id, everything.refund.velocity_counted_statuses, since=since
-        )
-        == 5
-    )
+    assert await repo.recent_count(
+        db_session, customer.id, everything.refund.velocity_counted_statuses, since=since
+    ) == len(ALL)
     assert (
         await repo.recent_count(
             db_session, customer.id, only_succeeded.refund.velocity_counted_statuses, since=since

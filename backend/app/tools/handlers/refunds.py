@@ -5,6 +5,7 @@ Lock order is defined in app.db.locking: order -> user -> refund -> approval.
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +16,7 @@ from app.db.models.enums import ApprovalStatus, PolicyDecision, RefundStatus, To
 from app.events.types import EventType
 from app.modules import audit
 from app.modules.orders import service as orders_service
-from app.modules.refunds import repo
+from app.modules.refunds import expiry, repo
 from app.modules.refunds import service as refund_service
 from app.modules.refunds.hashing import is_valid_idempotency_key, request_hash
 from app.modules.refunds.payments import PaymentProvider
@@ -285,7 +286,7 @@ class _DecisionState:
 
 
 async def _lock_for_decision(
-    session: AsyncSession, approval_id: uuid.UUID
+    session: AsyncSession, approval_id: uuid.UUID, *, now: datetime
 ) -> tuple[Approval, Refund, Order]:
     """Take the locks in the documented order. We must read the approval and refund first, WITHOUT
     locking, only to learn which order to lock; everything is then re-read under the locks."""
@@ -306,6 +307,12 @@ async def _lock_for_decision(
     approval = await locking.lock_approval(session, approval_id)
     assert refund is not None and approval is not None
 
+    # Expired: swept already (status `expired`), or past the deadline and not swept yet. Either way
+    # nobody may decide it any more (approve and reject alike).
+    if approval.status == ApprovalStatus.expired or expiry.is_past_deadline(approval, now):
+        raise ToolError(
+            "APPROVAL_EXPIRED", "This approval expired: nobody decided it in time.", http_status=409
+        )
     if approval.status != ApprovalStatus.pending or refund.status != RefundStatus.pending_approval:
         raise ToolError("ALREADY_DECIDED", "This approval was already decided.", http_status=409)
     return approval, refund, order
@@ -317,7 +324,7 @@ class _DecisionHandler:
     async def decide(
         self, session: AsyncSession, ctx: ToolContext, args: Any, rules: Rules
     ) -> Decision:
-        approval, refund, order = await _lock_for_decision(session, args.approval_id)
+        approval, refund, order = await _lock_for_decision(session, args.approval_id, now=ctx.now)
         customer_id = order.user_id
         payment = await repo.succeeded_payment(session, order.id)
         facts = await refund_service.build_facts(

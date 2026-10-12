@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 
 from app.agent.llm.fake import ObedientFakeLLM
-from app.db.models import Approval, Refund, WorkflowRun
+from app.db.models import Approval, WorkflowRun
 from app.events.envelope import EventEnvelope
 from app.modules.refunds.payments import SimulatedPaymentProvider
 from app.policy.types import Actor
@@ -23,16 +23,26 @@ class Turn:
 
 
 async def waiting_turn(
-    db: CommittedDB, world: World, provider: SimulatedPaymentProvider, amount: str = "700"
+    db: CommittedDB,
+    world: World,
+    provider: SimulatedPaymentProvider,
+    amount: str = "700",
+    order: uuid.UUID | None = None,
 ) -> Turn:
+    """A chat turn waiting for approval. `order` defaults to the 1000.00 order; a test that makes
+    several waiting turns passes the 3000.00 one so they all fit under its total."""
     orch = make_orchestrator(ObedientFakeLLM(), provider)
     async with db.maker() as s:
-        text = f"my order {world.order} arrived damaged, refund {amount}"
+        text = f"my order {order or world.order} arrived damaged, refund {amount}"
         r = (await chat(orch, s, world.alice, text)).response
         assert r["status"] == "waiting_approval"
-        (approval,) = await all_rows(s, Approval)
-        (refund,) = await all_rows(s, Refund)
-        return Turn(orch, uuid.UUID(r["workflow_id"]), approval.id, refund.id)
+        run_id = uuid.UUID(r["workflow_id"])
+        approvals = await all_rows(s, Approval)
+        ids = {a.id for a in approvals}
+        # the approval and refund this turn created are the newest ones
+        approval = max(approvals, key=lambda a: a.created_at)
+        assert approval.id in ids
+        return Turn(orch, run_id, approval.id, approval.refund_id)
 
 
 async def decide(db: CommittedDB, turn: Turn, world: World, tool: str = "approve_refund"):

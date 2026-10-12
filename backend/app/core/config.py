@@ -114,6 +114,13 @@ class Settings(BaseSettings):
     # the RIGHT is used: the left side of the header is client-controlled and is never trusted.
     trusted_proxy_hops: int = Field(0, ge=0)
 
+    # Approval expiry (the sweeper, `python -m app.jobs.sweeper`): a pending approval older than
+    # this many hours is expired, and a decision on it is refused from the deadline on. The
+    # limit is a setting, not a rule in rules.yaml.
+    approval_ttl_hours: int = Field(48, ge=1)
+    sweeper_interval_s: float = Field(60.0, gt=0)
+    sweeper_batch_size: int = Field(50, ge=1)
+
     @field_validator("gemini_api_key", "llm_model", "embedding_model", mode="before")
     @classmethod
     def _blank_means_unset(cls, v: object) -> object:
