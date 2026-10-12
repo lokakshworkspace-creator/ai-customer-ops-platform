@@ -1,4 +1,4 @@
-"""The resume consumer on the REAL stack (these two tests carry the `kafka` marker through the
+"""The resume consumer on the REAL stack (these tests carry the `kafka` marker through the
 `kafka_env` fixture): approval -> outbox -> relay -> Redpanda topic -> resume consumer -> the
 waiting turn is finished, with NO read-time sync involved (nothing here calls GET /workflows)."""
 
@@ -13,11 +13,12 @@ from app.db.models.enums import WorkflowStatus
 from app.events.consumers.base import ConsumerConfig, EventConsumer
 from app.events.consumers.resume import CONSUMER_NAME, resume_waiting_turn
 from app.events.relay import Relay
+from app.modules.refunds import expiry
 from app.modules.refunds.payments import SimulatedPaymentProvider
 from app.tests.agent_helpers import all_rows
 from app.tests.conftest import CommittedDB
 from app.tests.event_helpers import KafkaEnv, read_topic
-from app.tests.resume_helpers import decide, run_of, waiting_turn
+from app.tests.resume_helpers import backdate, decide, run_of, waiting_turn
 from app.tests.worlds import World, make_world
 
 pytestmark = pytest.mark.usefixtures("committed_db")
@@ -97,3 +98,23 @@ async def test_a_poison_message_is_dead_lettered_and_the_real_event_still_resume
     assert (await run_of(committed_db, turn.run_id)).status == WorkflowStatus.completed
     dead = await read_topic(kafka_env, kafka_env.dlq_topic)
     assert len(dead) == 1 and dead[0].value == b"this is not json"
+
+
+async def test_an_expiry_travels_through_redpanda_and_finishes_the_waiting_turn(
+    committed_db, kafka_env, world
+) -> None:
+    """Phase 6: the sweeper expires an approval; refund.expired -> outbox -> relay -> Redpanda ->
+    resume consumer; the customer's turn ends with the expired message. No GET, no sync."""
+    turn = await waiting_turn(committed_db, world, SimulatedPaymentProvider())
+    await backdate(committed_db, turn.approval_id, 49)
+    async with committed_db.maker() as s:
+        assert await expiry.expire_one(s, turn.approval_id, request_id="req-sweep-kafka") is True
+    assert (await run_of(committed_db, turn.run_id)).status == WorkflowStatus.waiting_approval
+
+    await relay_then_resume(committed_db, kafka_env)
+
+    run = await run_of(committed_db, turn.run_id)
+    assert (run.state, run.status) == ("DONE", WorkflowStatus.completed)
+    assert (await last_text(committed_db, turn.run_id)).endswith("expired without a decision.")
+    published = await read_topic(kafka_env, kafka_env.refund_topic)
+    assert any(b"refund.expired" in rec.value for rec in published)

@@ -82,7 +82,7 @@ async def test_the_list_carries_everything_the_page_shows(refund_client, world) 
     assert item["review_text"]  # the policy's own words
     assert item["requester_refunds_in_window"] == 1 and item["velocity_window_days"] == 30
     assert (item["decided_by"], item["decided_at"], item["decision_reason"]) == (None, None, None)
-    assert item["expires_at"] is None  # approvals do not expire yet
+    assert item["expires_at"] is not None  # the deadline (Phase 6); see test_admin_expiry_view
 
 
 async def test_the_list_contains_no_email_or_name(refund_client, world) -> None:

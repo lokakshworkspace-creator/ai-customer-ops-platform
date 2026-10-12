@@ -69,7 +69,10 @@ function ApprovalCard(props: {
         {a.refund && (
           <span className="text-xs text-slate-500">refund is {a.refund.status}</span>
         )}
-        <span className="ml-auto text-xs text-slate-500">requested {when(a.created_at)}</span>
+        <span className="ml-auto text-xs text-slate-500">
+          requested {when(a.created_at)}
+          {a.status === "pending" && a.expires_at && <> · decide by {when(a.expires_at)}</>}
+        </span>
       </div>
 
       <div className="space-y-1">
@@ -97,7 +100,13 @@ function ApprovalCard(props: {
         </div>
       </div>
 
-      {a.status !== "pending" && (
+      {a.status === "expired" && (
+        <div className="rounded bg-slate-50 px-2 py-1 text-xs text-slate-700">
+          Expired on {when(a.decided_at)}: nobody decided in time, nothing was paid
+          {a.decision_reason && <> — “{a.decision_reason}”</>}
+        </div>
+      )}
+      {a.status !== "pending" && a.status !== "expired" && (
         <div className="rounded bg-slate-50 px-2 py-1 text-xs text-slate-700">
           Decided by <span className="font-mono">{short(a.decided_by)}</span> on {when(a.decided_at)}
           {a.decision_reason && <> — “{a.decision_reason}”</>}

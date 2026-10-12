@@ -12,7 +12,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.db.models import Approval, AuditLog, OutboxEvent, Refund
@@ -24,7 +24,7 @@ from app.modules.refunds.payments import SimulatedPaymentProvider
 from app.policy.rules import get_rules
 from app.tests.agent_helpers import all_rows
 from app.tests.conftest import BACKEND_DIR, CommittedDB, _test_db_url
-from app.tests.resume_helpers import Turn, decide, waiting_turn
+from app.tests.resume_helpers import Turn, backdate, decide, waiting_turn
 from app.tests.worlds import World, make_world
 
 pytestmark = pytest.mark.usefixtures("committed_db")
@@ -36,17 +36,6 @@ async def world(committed_db: CommittedDB) -> World:
         w = await make_world(s)
         await s.commit()
     return w
-
-
-async def backdate(db: CommittedDB, approval_id: uuid.UUID, hours: float) -> None:
-    async with db.maker() as s:
-        await s.execute(
-            text(
-                "UPDATE approvals SET created_at = now() - make_interval(secs => :s) WHERE id = :i"
-            ),
-            {"s": hours * 3600, "i": approval_id},
-        )
-        await s.commit()
 
 
 async def approval_and_refund(db: CommittedDB, turn: Turn) -> tuple[Approval, Refund]:

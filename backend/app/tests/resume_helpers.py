@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from app.agent.llm.fake import ObedientFakeLLM
 from app.db.models import Approval, WorkflowRun
@@ -75,6 +75,18 @@ def event(
             "status": status,
         },
     )
+
+
+async def backdate(db: CommittedDB, approval_id: uuid.UUID, hours: float) -> None:
+    """Make an approval `hours` old (committed), e.g. to push it past the expiry limit."""
+    async with db.maker() as s:
+        await s.execute(
+            text(
+                "UPDATE approvals SET created_at = now() - make_interval(secs => :s) WHERE id = :i"
+            ),
+            {"s": hours * 3600, "i": approval_id},
+        )
+        await s.commit()
 
 
 async def run_of(db: CommittedDB, run_id: uuid.UUID) -> WorkflowRun:

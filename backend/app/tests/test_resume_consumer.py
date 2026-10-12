@@ -11,12 +11,13 @@ from app.db.models import Message, ProcessedEvent, Refund, ToolCall
 from app.db.models.enums import WorkflowStatus
 from app.events.consumers.base import ConsumerConfig, EventConsumer
 from app.events.consumers.resume import CONSUMER_NAME, resume_waiting_turn
+from app.modules.refunds import expiry
 from app.modules.refunds.payments import SimulatedPaymentProvider
 from app.modules.refunds.service import payout_flow
 from app.tests.agent_helpers import all_rows
 from app.tests.conftest import CommittedDB
 from app.tests.event_helpers import RecordingProducer
-from app.tests.resume_helpers import decide, event, n, run_of, waiting_turn
+from app.tests.resume_helpers import backdate, decide, event, n, run_of, waiting_turn
 from app.tests.worlds import World, make_world
 
 pytestmark = pytest.mark.usefixtures("committed_db")
@@ -170,3 +171,58 @@ async def test_finishing_a_turn_never_touches_the_refund(committed_db, world) ->
     async with committed_db.maker() as s:
         (after,) = await all_rows(s, Refund)
         assert (after.status, after.updated_at) == state
+
+
+async def _expired_turn(committed_db, world):
+    turn = await waiting_turn(committed_db, world, SimulatedPaymentProvider())
+    await backdate(committed_db, turn.approval_id, 49)
+    async with committed_db.maker() as s:
+        assert await expiry.expire_one(s, turn.approval_id) is True
+    return turn
+
+
+async def test_an_expired_event_finishes_the_turn_with_a_clear_expired_message(
+    committed_db, world
+) -> None:
+    turn = await _expired_turn(committed_db, world)
+    assert (await run_of(committed_db, turn.run_id)).status == WorkflowStatus.waiting_approval
+    messages, tool_calls = await n(committed_db, Message), await n(committed_db, ToolCall)
+
+    ev = event("refund.expired", turn.refund_id, world.alice.id, status="expired")
+    c = consumer(committed_db)
+    assert await deliver(c, ev) == "processed"
+
+    run = await run_of(committed_db, turn.run_id)
+    assert (run.state, run.status) == ("DONE", WorkflowStatus.completed)
+    text = await last_text(committed_db, turn.run_id)
+    assert text == "Update: your refund request of 700.00 INR expired without a decision."
+    assert "paid" not in text
+    assert run.context["outcome"] == {"approval_status": "expired", "refund_status": "expired"}
+    assert await n(committed_db, Message) == messages + 1
+    assert await n(committed_db, ToolCall) == tool_calls  # no tool, no model
+
+    assert await deliver(c, ev) == "duplicate"
+    assert await deliver(c, event("refund.expired", turn.refund_id, world.alice.id)) == "processed"
+    assert await n(committed_db, Message) == messages + 1  # still one message
+
+
+async def test_the_read_time_fallback_finishes_an_expired_turn_the_same_way(
+    committed_db, world
+) -> None:
+    """The consumer is down: the customer's next GET finishes the turn with the same words."""
+    from app.agent import resume
+
+    turn = await _expired_turn(committed_db, world)
+    async with committed_db.maker() as s:
+        assert await resume.sync_waiting(s, turn.run_id) is True
+    assert (await last_text(committed_db, turn.run_id)).endswith("expired without a decision.")
+    assert (await run_of(committed_db, turn.run_id)).status == WorkflowStatus.completed
+
+
+async def test_an_expired_event_about_another_customer_never_finishes_the_turn(
+    committed_db, world
+) -> None:
+    turn = await _expired_turn(committed_db, world)
+    ev = event("refund.expired", turn.refund_id, world.bob.id, status="expired")
+    await deliver(consumer(committed_db), ev)
+    assert (await run_of(committed_db, turn.run_id)).status == WorkflowStatus.waiting_approval

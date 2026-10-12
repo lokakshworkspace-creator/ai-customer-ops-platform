@@ -15,7 +15,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Approval, Order, Refund
-from app.modules.refunds import repo
+from app.db.models.enums import ApprovalStatus
+from app.modules.refunds import expiry, repo
 from app.modules.refunds.service import money
 from app.policy.rules import Rules
 
@@ -43,6 +44,7 @@ async def admin_items(
         orders = {
             o.id: o for o in await session.scalars(select(Order).where(Order.id.in_(order_ids)))
         }
+    ttl = expiry.approval_ttl()
     window = rules.refund.velocity_window_days
     since = now - timedelta(days=window)
 
@@ -67,7 +69,12 @@ async def admin_items(
                 "decided_by": str(a.decided_by) if a.decided_by else None,
                 "decided_at": _iso(a.decided_at),
                 "decision_reason": a.decision_reason,
-                "expires_at": _iso(a.expires_at),  # approvals do not expire yet (deferred)
+                # the deadline: stored when the sweeper expired it, else created_at + the limit
+                # for a pending one (a decided approval has no deadline to show)
+                "expires_at": _iso(
+                    a.expires_at
+                    or (expiry.deadline_of(a, ttl) if a.status == ApprovalStatus.pending else None)
+                ),
                 "payload": a.payload,
                 "refund": (
                     {
