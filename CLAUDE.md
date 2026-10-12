@@ -43,4 +43,5 @@ ALLOW | REQUIRE_APPROVAL | DENY, always with a reason (written to audit_logs).
 0 Foundation · 1 Core domain + auth · 2 Tools + policy + refunds (+ outbox relay/consumers)
 3 Agent + LLM + first UI · 4 RAG · 5 Human approval + events · 6 Resilience, observability, evals · 7 Polish
 
-## Current phase: Phases 0-5 done. Next: Phase 6 (resilience, observability, evals)
+## Current phase: Phases 0-6 done. Next: Phase 7 (polish)
+Phase 6 was built as hardening (login rate limiting in Redis, token revocation and logout in Postgres, approval expiry by a sweeper process, observability). The answer-level evals and a re-ranker from the original plan are NOT done and still open. The sweeper (`python -m app.jobs.sweeper`) must be running for approvals to expire.
