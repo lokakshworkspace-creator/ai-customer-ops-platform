@@ -84,6 +84,7 @@ order's refundable total or the customer's refund-frequency limit.
 | Situation | HTTP | Test |
 |---|---|---|
 | Already decided (also when two admins act at once) | **409** `ALREADY_DECIDED` | `test_an_approval_can_only_be_decided_once`, `test_two_admins_approving_at_once_decide_exactly_once` |
+| Expired (the sweeper expired it) or **overdue** (pending, but older than `APPROVAL_TTL_HOURS`, not swept yet), approve **and** reject | **409** `APPROVAL_EXPIRED`; nothing is paid or changed | `test_a_swept_approval_cannot_be_decided`, `test_an_overdue_approval_the_sweeper_has_not_reached_yet_is_refused_too` |
 | A customer calls it | **403** `ROLE_NOT_PERMITTED` (logged) | `test_a_customer_cannot_decide_and_the_attempt_is_logged` |
 | An admin approves **their own** request | **403** `SELF_APPROVAL` | `test_an_admin_cannot_approve_their_own_request` |
 | Approving after the order aged past 30 days | **403** `ORDER_TOO_OLD`; the approval stays open | `test_approval_is_denied_if_the_order_has_since_aged_out_of_the_window` |
