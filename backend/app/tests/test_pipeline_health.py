@@ -180,6 +180,24 @@ async def test_a_turn_still_waiting_long_after_a_final_decision_means_the_consum
     assert body["status"] == "attention" and "turns_not_finished" in body["attention"]
 
 
+async def test_a_turn_still_waiting_long_after_an_expiry_means_the_consumer_is_down(
+    refund_client, db_session, world
+) -> None:
+    from app.modules.refunds import expiry
+
+    refund_id, approval_id = await pending(refund_client, world.alice, world.order, "700.00")
+    await wait_turn(db_session, world, refund_id, approval_id)
+    await db_session.execute(
+        text("UPDATE approvals SET created_at = now() - interval '50 hours' WHERE id = :i"),
+        {"i": uuid.UUID(approval_id)},
+    )
+    assert await expiry.expire_one(db_session, uuid.UUID(approval_id)) is True
+    await age_decision(db_session, approval_id, refund_id, 300)
+    body = await get(refund_client, world.admin)
+    assert body["waiting_turns"]["decided_not_finished"] == 1
+    assert "turns_not_finished" in body["attention"]
+
+
 async def test_an_approved_refund_still_processing_is_not_a_stuck_turn(
     refund_client, db_session, world, provider
 ) -> None:

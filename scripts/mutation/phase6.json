@@ -1,0 +1,186 @@
+[
+  {
+    "id": "L1",
+    "desc": "the limiter blocks one failure too late (off by one)",
+    "file": "app/core/login_limiter.py",
+    "old": "if raw is None or int(raw) < self.max_failures:",
+    "new": "if raw is None or int(raw) <= self.max_failures:",
+    "tests": "app/tests/test_login_rate_limit.py"
+  },
+  {
+    "id": "L2",
+    "desc": "a successful login no longer resets the failure counter",
+    "file": "app/api/routers/auth.py",
+    "old": "    await limiter.reset(body.email, ip)\n",
+    "new": "    pass\n",
+    "tests": "app/tests/test_login_rate_limit.py"
+  },
+  {
+    "id": "L3",
+    "desc": "a failed login is not counted at all",
+    "file": "app/api/routers/auth.py",
+    "old": "        await limiter.record_failure(body.email, ip)\n",
+    "new": "        pass\n",
+    "tests": "app/tests/test_login_rate_limit.py"
+  },
+  {
+    "id": "L4",
+    "desc": "Redis down FAILS CLOSED: every login is blocked (should fail open)",
+    "file": "app/core/login_limiter.py",
+    "old": "            self._unavailable(\"check\", exc)\n            return None",
+    "new": "            self._unavailable(\"check\", exc)\n            return 1",
+    "tests": "app/tests/test_login_rate_limit.py"
+  },
+  {
+    "id": "L5",
+    "desc": "the counter key ignores the client IP (one IP can lock a victim out from anywhere)",
+    "file": "app/core/login_limiter.py",
+    "old": "f\"{normalise_email(email)}|{ip}\".encode()",
+    "new": "f\"{normalise_email(email)}\".encode()",
+    "tests": "app/tests/test_login_rate_limit.py"
+  },
+  {
+    "id": "L6",
+    "desc": "X-Forwarded-For: the client-controlled LEFT entry is trusted instead of the proxy's",
+    "file": "app/core/login_limiter.py",
+    "old": "candidate = parts[-trusted_hops]",
+    "new": "candidate = parts[0]",
+    "tests": "app/tests/test_login_rate_limit.py"
+  },
+  {
+    "id": "L7",
+    "desc": "the counter is created without a TTL (a blocked caller would stay blocked forever)",
+    "file": "app/core/login_limiter.py",
+    "old": "if c == 1 or redis.call('PTTL', KEYS[1]) < 0 then",
+    "new": "if false then",
+    "tests": "app/tests/test_login_rate_limit.py"
+  },
+  {
+    "id": "T1",
+    "desc": "a revoked token is accepted (the denylist is not consulted)",
+    "file": "app/api/deps.py",
+    "old": "if await users_tokens.is_revoked(session, claims.jti):",
+    "new": "if False:",
+    "tests": "app/tests/test_token_revocation.py app/tests/test_logout.py"
+  },
+  {
+    "id": "T2",
+    "desc": "an over-long jti is accepted",
+    "file": "app/core/security.py",
+    "old": "if not jti or len(jti) > 64:",
+    "new": "if False:",
+    "tests": "app/tests/test_token_revocation.py"
+  },
+  {
+    "id": "T3",
+    "desc": "logout does not commit the revocation (invisible with a rolled-back test session)",
+    "file": "app/api/routers/auth.py",
+    "old": "    await session.commit()\n    return Response(status_code=status.HTTP_204_NO_CONTENT)",
+    "new": "    return Response(status_code=status.HTTP_204_NO_CONTENT)",
+    "tests": "app/tests/test_logout.py"
+  },
+  {
+    "id": "X1",
+    "desc": "the sweeper expires an approval that is NOT yet past its limit",
+    "file": "app/modules/refunds/expiry.py",
+    "old": "        or not is_past_deadline(approval, now, ttl)\n",
+    "new": "",
+    "tests": "app/tests/test_approval_expiry.py"
+  },
+  {
+    "id": "X2",
+    "desc": "an expiry writes no refund.expired event",
+    "file": "app/modules/refunds/expiry.py",
+    "old": "    refund_service.emit(\n        session, refund, customer_id, EventType.REFUND_EXPIRED, request_id=request_id\n    )\n",
+    "new": "",
+    "tests": "app/tests/test_approval_expiry.py"
+  },
+  {
+    "id": "X3",
+    "desc": "an expired approval leaves its refund pending (money and velocity slot stay held)",
+    "file": "app/modules/refunds/expiry.py",
+    "old": "    refund.status = RefundStatus.expired\n",
+    "new": "    refund.status = refund.status\n",
+    "tests": "app/tests/test_approval_expiry.py"
+  },
+  {
+    "id": "X4",
+    "desc": "the decision handlers no longer refuse an OVERDUE approval the sweeper has not reached yet",
+    "file": "app/tools/handlers/refunds.py",
+    "old": "if approval.status == ApprovalStatus.expired or expiry.is_past_deadline(approval, now):",
+    "new": "if approval.status == ApprovalStatus.expired:",
+    "tests": "app/tests/test_approval_expiry.py app/tests/test_admin_expiry_view.py"
+  },
+  {
+    "id": "X5",
+    "desc": "the decision handlers no longer refuse an approval the sweeper HAS expired (wrong error)",
+    "file": "app/tools/handlers/refunds.py",
+    "old": "if approval.status == ApprovalStatus.expired or expiry.is_past_deadline(approval, now):",
+    "new": "if expiry.is_past_deadline(approval, now):",
+    "tests": "app/tests/test_approval_expiry.py app/tests/test_admin_expiry_view.py"
+  },
+  {
+    "id": "X6",
+    "desc": "the limit is read in days instead of hours",
+    "file": "app/modules/refunds/expiry.py",
+    "old": "    return timedelta(hours=get_settings().approval_ttl_hours)",
+    "new": "    return timedelta(days=get_settings().approval_ttl_hours)",
+    "tests": "app/tests/test_approval_expiry.py app/tests/test_admin_expiry_view.py"
+  },
+  {
+    "id": "X7",
+    "desc": "the sweeper no longer purges expired revocations",
+    "file": "app/jobs/sweeper.py",
+    "old": "stats.purged_tokens = await users_tokens.purge_expired(session)",
+    "new": "stats.purged_tokens = 0",
+    "tests": "app/tests/test_approval_expiry.py"
+  },
+  {
+    "id": "X8",
+    "desc": "the resume consumer ignores refund.expired (the customer is never told)",
+    "file": "app/events/consumers/resume.py",
+    "old": "        EventType.REFUND_EXPIRED.value,\n",
+    "new": "",
+    "tests": "app/tests/test_resume_consumer.py app/tests/test_refund_expired_status.py"
+  },
+  {
+    "id": "O1",
+    "desc": "a crash's 500 carries no X-Request-ID header",
+    "file": "app/api/middleware.py",
+    "old": "                headers={REQUEST_ID_HEADER: request_id},",
+    "new": "                headers={},",
+    "tests": "app/tests/test_observability.py"
+  },
+  {
+    "id": "O2",
+    "desc": "an unhandled error is no longer logged",
+    "file": "app/api/middleware.py",
+    "old": "            log.error(\"unhandled_exception\", exc_info=True)",
+    "new": "            pass",
+    "tests": "app/tests/test_observability.py"
+  },
+  {
+    "id": "O3",
+    "desc": "any customer may read the pipeline snapshot",
+    "file": "app/api/routers/admin.py",
+    "old": "    _admin: Annotated[User, Depends(require_role(Role.admin))],",
+    "new": "    _admin: Annotated[User, Depends(require_role(Role.admin, Role.customer))],",
+    "tests": "app/tests/test_pipeline_health.py"
+  },
+  {
+    "id": "O4",
+    "desc": "an expired approval no longer counts as a final decision (a dead consumer goes unseen)",
+    "file": "app/modules/pipeline_health.py",
+    "old": "(a.status IN ('rejected', 'expired')",
+    "new": "(a.status IN ('rejected')",
+    "tests": "app/tests/test_pipeline_health.py"
+  },
+  {
+    "id": "O5",
+    "desc": "an approved refund that is still processing is treated as a stuck turn (false alarm)",
+    "file": "app/modules/pipeline_health.py",
+    "old": "OR (a.status = 'approved' AND r.status IN ('succeeded', 'failed'))) AS final,",
+    "new": "OR (a.status = 'approved')) AS final,",
+    "tests": "app/tests/test_pipeline_health.py"
+  }
+]

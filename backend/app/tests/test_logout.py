@@ -105,3 +105,20 @@ async def test_a_revoked_token_cannot_log_in_again_but_a_new_login_works(
     new = await _token_for(db_client, "alice@example.com")
     assert decode_token(new).jti != decode_token(old).jti
     assert (await db_client.get("/api/v1/auth/me", headers=bearer(new))).status_code == 200
+
+
+async def test_the_revocation_is_committed_not_just_visible_inside_one_session(
+    committed_client: AsyncClient, committed_db
+) -> None:
+    """With the per-test rolled-back session a missing commit would be invisible. Here every request
+    gets its own session and connection, so the token is only refused afterwards if the logout
+    really committed its row."""
+    async with committed_db.maker() as s:
+        await create_user(s, email="alice@example.com", password=PASSWORD)
+        await s.commit()
+    token = await _token_for(committed_client, "alice@example.com")
+    assert (await committed_client.get("/api/v1/auth/me", headers=bearer(token))).status_code == 200
+    assert (await committed_client.post(URL, headers=bearer(token))).status_code == 204
+    assert (await committed_client.get("/api/v1/auth/me", headers=bearer(token))).status_code == 401
+    async with committed_db.maker() as s:
+        assert await s.scalar(select(func.count()).select_from(RevokedToken)) == 1
