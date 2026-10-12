@@ -11,8 +11,8 @@
     "id": "P2",
     "desc": "the admin role check is gone from the staff knowledge-base lookup (a customer can read internal documents)",
     "file": "app/api/routers/admin.py",
-    "old": "admin: Annotated[User, Depends(require_role(Role.admin))],",
-    "new": "admin: Annotated[User, Depends(require_role(Role.admin, Role.customer))],",
+    "old": "request: Request,\n    admin: Annotated[User, Depends(require_role(Role.admin))],",
+    "new": "request: Request,\n    admin: Annotated[User, Depends(require_role(Role.admin, Role.customer))],",
     "tests": "app/tests/test_staff_kb_search.py"
   },
   {

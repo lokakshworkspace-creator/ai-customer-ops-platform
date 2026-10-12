@@ -63,7 +63,7 @@ async def expire(db: CommittedDB, approval_id: uuid.UUID, **kw) -> bool:
         return await expiry.expire_one(s, approval_id, **kw)
 
 
-# --- expiring --------------------------------------------------------------------------------
+# --- expiring ---------------------------------------------------------------------------
 
 
 async def test_a_stale_approval_expires_with_its_refund_an_event_and_an_audit_row(
@@ -173,7 +173,7 @@ async def test_due_ids_are_only_pending_and_overdue_oldest_first_and_limited(
     assert limited == [t2.approval_id]
 
 
-# --- deciding an expired or overdue approval is refused --------------------------------------
+# --- deciding an expired or overdue approval is refused ---------------------------------
 
 
 @pytest.mark.parametrize("tool", ["approve_refund", "reject_refund"])
@@ -230,7 +230,7 @@ async def test_an_already_decided_approval_still_says_already_decided(committed_
     assert out.error_code == "ALREADY_DECIDED"  # the old answer, not "expired"
 
 
-# --- the race: a decision and the sweeper at the same moment ---------------------------------
+# --- the race: a decision and the sweeper at the same moment ----------------------------
 
 
 async def test_a_decision_and_the_sweeper_on_an_overdue_approval_end_expired_exactly_once(
@@ -291,7 +291,7 @@ async def test_a_decision_made_just_inside_the_limit_beats_a_late_sweeper(
     assert refund.status in (RefundStatus.processing, RefundStatus.succeeded)
 
 
-# --- the sweeper -----------------------------------------------------------------------------
+# --- the sweeper ------------------------------------------------------------------------
 
 
 async def test_a_sweep_expires_everything_due_and_purges_old_revocations(

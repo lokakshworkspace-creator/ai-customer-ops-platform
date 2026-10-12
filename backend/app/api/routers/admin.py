@@ -2,6 +2,8 @@
 
 GET /api/v1/admin/knowledge/search?q=...  searches the knowledge base INCLUDING the internal
 documents, for administrators only.
+GET /api/v1/admin/pipeline  a read-only snapshot of the background machinery (relay, resume
+consumer, sweeper): counts and ages from the database, no ids, no model, not part of /health.
 
 * It calls the retriever directly: no LLM, no tool, and nothing the assistant can reach (the
   assistant's `search_knowledge_base` is hard-wired to customer documents for everyone).
@@ -13,6 +15,7 @@ documents, for administrators only.
 * The embedding call (an HTTP request) happens with no database transaction open.
 """
 
+from datetime import UTC, datetime
 from typing import Annotated
 
 import structlog
@@ -24,7 +27,8 @@ from app.api.deps import get_session, require_role
 from app.core.config import get_settings
 from app.db.models import User
 from app.db.models.enums import Role
-from app.modules import audit
+from app.modules import audit, pipeline_health
+from app.modules.refunds import expiry
 from app.rag.audience import audiences_for_role
 from app.rag.embedder import Embedder, EmbedderError
 from app.rag.factory import get_embedder, retrieval_params
@@ -114,3 +118,20 @@ async def search_knowledge(
             ],
         }
     )
+
+
+@router.get("/pipeline")
+async def pipeline(
+    _admin: Annotated[User, Depends(require_role(Role.admin))],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """Is the relay publishing, is the resume consumer finishing turns, is the sweeper running?
+    Read-only: it ends its transaction without writing anything."""
+    snapshot = await pipeline_health.snapshot(
+        session,
+        now=datetime.now(UTC),
+        approval_ttl=expiry.approval_ttl(),
+        sweeper_interval_s=get_settings().sweeper_interval_s,
+    )
+    await session.rollback()
+    return snapshot
