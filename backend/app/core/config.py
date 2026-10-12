@@ -108,10 +108,13 @@ class Settings(BaseSettings):
     login_max_failures: int = Field(5, ge=1)
     login_window_seconds: int = Field(900, ge=1)
     login_limiter_timeout_s: float = Field(0.5, gt=0)
-    # How many reverse proxies in front of the API append to X-Forwarded-For. 0 (the default)
-    # means "do not read the header; use the socket peer". Behind the Next.js proxy of the dev
-    # setup the peer is always 127.0.0.1, so set this to 1 there. The entry that many hops from
-    # the RIGHT is used: the left side of the header is client-controlled and is never trusted.
+    # How many reverse proxies in front of the API APPEND to X-Forwarded-For. 0 (the default) means
+    # "do not read the header; use the socket peer". Set N > 0 only if N proxies you control add the
+    # caller's address to the header (nginx, a cloud load balancer, ...): the entry N hops from the
+    # RIGHT is used, because the left side is client-controlled and is never trusted.
+    # DO NOT set it behind the Next.js proxy of the dev setup: that rewrite forwards the client's
+    # own X-Forwarded-For unchanged and adds none (checked), so with N = 1 any client could dodge
+    # the limiter by sending its own header. With 0 every browser behind it looks like 127.0.0.1.
     trusted_proxy_hops: int = Field(0, ge=0)
 
     # Approval expiry (the sweeper, `python -m app.jobs.sweeper`): a pending approval older than

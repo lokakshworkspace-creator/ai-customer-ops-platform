@@ -24,7 +24,11 @@ while Redis is down there is no rate limiting. Redis is disposable by design (go
 only ever makes the system stricter, never decides who may log in.
 
 CLIENT IP. See `client_ip`: the socket peer, or the entry `trusted_proxy_hops` from the right of
-X-Forwarded-For when the deployment says there are that many proxies in front of the API.
+X-Forwarded-For when the deployment says there are that many proxies in front of the API that
+APPEND to it. Behind the Next.js dev proxy (which forwards the header unchanged and adds none) the
+setting must stay 0: every browser then shares the peer address 127.0.0.1, so in that setup the
+limit is effectively per email, and an attacker who knows an email can keep it blocked (the
+lock-out trade-off of any per-account limit; a real proxy that sets X-Forwarded-For removes it).
 """
 
 import asyncio
