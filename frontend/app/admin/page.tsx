@@ -12,6 +12,7 @@ import {
   getMe,
   listApprovals,
   login,
+  logoutRequest,
   searchKnowledge,
 } from "../../lib/api";
 import { isAborted, messageOf, tokenStore } from "../../lib/auth";
@@ -176,6 +177,19 @@ export default function AdminPage() {
     setKb(null);
   }, []);
 
+  // The Sign out button: ask the server to revoke the token, then sign out locally whatever it says
+  // (an expired or already revoked token just means there is nothing left to revoke).
+  const signOut = useCallback(async () => {
+    if (token) {
+      try {
+        await logoutRequest(token);
+      } catch {
+        /* sign out locally anyway; the token expires on its own */
+      }
+    }
+    logout();
+  }, [token, logout]);
+
   // Who is signed in, from the database (not from the token).
   useEffect(() => {
     if (!token) return;
@@ -316,7 +330,7 @@ export default function AdminPage() {
             Signed in as <strong>{me.email}</strong> ({me.role})
           </span>
         )}
-        <button className="text-slate-600 underline" onClick={logout}>
+        <button className="text-slate-600 underline" onClick={() => void signOut()}>
           Sign out
         </button>
       </div>

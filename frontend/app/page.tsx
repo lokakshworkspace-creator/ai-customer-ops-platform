@@ -8,6 +8,7 @@ import {
   ToolResult,
   getWorkflow,
   login,
+  logoutRequest,
   sendChat,
 } from "../lib/api";
 import { isAborted, messageOf, tokenStore } from "../lib/auth";
@@ -127,6 +128,19 @@ export default function Page() {
     setTurns([]);
     setConversationId(undefined);
   }, []);
+
+  // The Sign out button: ask the server to revoke the token, then sign out locally whatever it says
+  // (an expired or already revoked token just means there is nothing left to revoke).
+  const signOut = useCallback(async () => {
+    if (token) {
+      try {
+        await logoutRequest(token);
+      } catch {
+        /* sign out locally anyway; the token expires on its own */
+      }
+    }
+    logout();
+  }, [token, logout]);
 
   async function onLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -288,7 +302,7 @@ export default function Page() {
           >
             New conversation
           </button>
-          <button className="text-slate-600 underline" onClick={logout}>
+          <button className="text-slate-600 underline" onClick={() => void signOut()}>
             Sign out
           </button>
         </div>

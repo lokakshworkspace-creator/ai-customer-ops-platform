@@ -125,6 +125,12 @@ async function request<T>(
   return { data: body as T, replayed: res.headers.get("Idempotent-Replayed") === "true" };
 }
 
+// Revokes this token on the server (it gets 401 everywhere afterwards). The page signs out locally
+// whatever the answer is.
+export async function logoutRequest(token: string): Promise<void> {
+  await request<unknown>("/api/v1/auth/logout", { method: "POST" }, token);
+}
+
 export async function login(email: string, password: string): Promise<string> {
   const { data } = await request<{ access_token: string }>("/api/v1/auth/login", {
     method: "POST",
