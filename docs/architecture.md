@@ -1,11 +1,12 @@
 # Architecture
 
-This document describes the system as designed (the target) and as built (Phases 0–4). Anything not yet built is marked **planned**. Diagrams use [Mermaid](https://mermaid.js.org/), which GitHub renders natively.
+This document describes the system as designed (the target) and as built (Phases 0–5). Anything not yet built is marked **planned**. Diagrams use [Mermaid](https://mermaid.js.org/), which GitHub renders natively.
 
 - [Target architecture](#target-architecture)
 - [The tool pipeline](#the-tool-pipeline)
 - [The agent](#the-agent)
 - [Retrieval: the knowledge base](#retrieval-the-knowledge-base)
+- [Human approval: the admin page and event-driven resume](#human-approval-the-admin-page-and-event-driven-resume)
 - [Request flows as implemented today](#request-flows-as-implemented-today)
 - [Concurrency and locking](#concurrency-and-locking)
 - [Data model](#data-model)
@@ -14,7 +15,7 @@ This document describes the system as designed (the target) and as built (Phases
 
 ## Target architecture
 
-A **modular monolith**: one FastAPI process, with orders, refunds and tickets as modules that each have a service layer and a repository layer. Postgres is the source of truth. The LLM only ever *proposes* tool calls; every proposal goes through schema validation, authorisation and the policy engine before anything executes. Two more processes run beside the API: the **outbox relay** and the **notification consumer**.
+A **modular monolith**: one FastAPI process, with orders, refunds and tickets as modules that each have a service layer and a repository layer. Postgres is the source of truth. The LLM only ever *proposes* tool calls; every proposal goes through schema validation, authorisation and the policy engine before anything executes. Three more processes run beside the API: the **outbox relay**, the **notification consumer** and the **workflow-resume consumer**.
 
 ```mermaid
 flowchart LR
@@ -22,7 +23,7 @@ flowchart LR
     classDef prov fill:#fff3cd,stroke:#b8860b,color:#111
     classDef planned fill:#eeeeee,stroke:#777,stroke-dasharray: 5 3,color:#111
 
-    UI["Web UI: Next.js chat page, no business logic"]:::built
+    UI["Web UI: Next.js chat page and admin page /admin, no business logic"]:::built
     HEALTH["GET /health"]:::built
 
     subgraph API["FastAPI modular monolith"]
@@ -35,7 +36,7 @@ flowchart LR
         TOOLS["Tools: registry, schema validation, executor"]:::built
         POL["Policy engine + rules.yaml: ALLOW, REQUIRE_APPROVAL, DENY"]:::built
         AGENT["Agent: orchestrator + state machine, tools view, derived keys"]:::built
-        APPRUI["Approval UI"]:::planned
+        ADMIN["Admin endpoints: GET /auth/me, enriched GET /approvals, staff knowledge-base lookup"]:::built
         RAG["RAG: chunker, ingest, hybrid retriever (search_knowledge_base)"]:::built
     end
 
@@ -46,6 +47,7 @@ flowchart LR
     RD[("Redis")]:::prov
     RELAY["Outbox relay (separate process)"]:::built
     CONS["Notification consumer (separate process)"]:::built
+    RESUME["Workflow-resume consumer (separate process)"]:::built
     RP[["Redpanda (Kafka API)"]]:::built
 
     UI -- "same-origin proxy" --> MW
@@ -53,6 +55,8 @@ flowchart LR
     AGENT -- "messages" --> LLM
     MW --> AUTH --> ORD --> PG
     AUTH --> REF --> PG
+    AUTH --> ADMIN --> PG
+    ADMIN -- "staff lookup: audience from the role, internal documents included" --> VEC
     HEALTH --> PG
     HEALTH --> RD
 
@@ -72,15 +76,17 @@ flowchart LR
     PG -- "outbox_events" --> RELAY
     RELAY --> RP --> CONS
     CONS -- "processed_events" --> PG
+    RP --> RESUME
+    RESUME -- "processed_events + finish the waiting turn, one transaction" --> PG
 ```
 
 | Colour / line | Meaning |
 |---|---|
-| Green, solid | **Built** (Phases 0–4) |
+| Green, solid | **Built** (Phases 0–5) |
 | Amber | **Provisioned, not yet used** — it runs in `docker-compose.yml` or is enabled in the migration, but no application code depends on it. Redis is only pinged by `/health`. |
-| Grey, dashed | **Planned** (Phases 5–7) |
+| Grey, dashed | **Planned** (Phases 6–7). Nothing in this diagram is planned any more; resilience, observability and evals add no component to it yet |
 
-The tools have two callers: the HTTP layer (the refund and approval endpoints) and the agent. Both call the same executor with the authenticated `Actor`; the agent's calls carry `origin="agent"`, which narrows what it may run (next section). The knowledge-base search is one more tool behind that executor: it is read-only, and it is not reachable over HTTP, only through the agent and the tests.
+The tools have two callers: the HTTP layer (the refund and approval endpoints) and the agent. Both call the same executor with the authenticated `Actor`; the agent's calls carry `origin="agent"`, which narrows what it may run (next section). The knowledge-base search is one more tool behind that executor: it is read-only, and it is not reachable over HTTP, only through the agent and the tests. Administrators read the same documents, **internal ones included**, through a separate endpoint that is not a tool (the staff lookup): it calls the retriever directly, and the model is not involved.
 
 ## The tool pipeline
 
@@ -126,7 +132,8 @@ flowchart TD
     P -- "cap already reached" --> E
     R["RESPOND: store the reply"] -- "no approval pending" --> D["DONE: status completed"]
     R -- "a refund awaits approval" --> W["WAITING_FOR_HUMAN: status waiting_approval"]
-    W -- "approval decided: read-time sync, templated message" --> D
+    W -- "decision is final: refund.* event (resume consumer), or the read-time fallback; one templated message" --> D
+    W -- "approved, payout still processing: stays waiting" --> W
     E["ESCALATED: the backend opens a support ticket through the executor"]
     P -- "model unreachable or error" --> F["FAILED"]
     X -- "error" --> F
@@ -172,7 +179,7 @@ What keeps the agent inside the rules:
 * **Limits.** At most 5 tool calls per turn and 20 per conversation (then `ESCALATED` and one ticket), a 90 s turn deadline, 30 turns per user per hour (`429`), `max_tokens` on every call, 20 messages of history, and no database transaction open while the model thinks.
 * **Failure.** If the model is unreachable before any tool ran, the turn is undone and the caller gets `503` (the same `message_id` can be sent again). If tools already ran, their effects are real, so the turn is kept, marked `failed`, and the reply says what was done.
 * **Ownership.** Conversations are the set of messages sharing a server-generated `conversation_id`; every message carries its `user_id`. Another user's conversation or workflow is `404`, administrators included.
-* **Waiting for a human.** A turn that created an approval ends `waiting_approval`. `GET /api/v1/workflows/{id}` (and the start of the next message) runs `resume.sync_waiting`: under a row lock it re-checks the status and, once an admin has decided, finishes the workflow with one templated message. That is a write inside a GET, safe because it is one idempotent transition (a second read finds `completed` and adds nothing). It is a stub: Phase 5 replaces it with event-driven resume.
+* **Waiting for a human.** A turn that created an approval ends `waiting_approval`, with the approval and refund ids (written by the backend) in its checkpoint. It is finished by `resume.finish_waiting` (one idempotent transition, with one templated message), called from three places: the **resume consumer** on a `refund.*` event (the normal path), the orchestrator **once right after the turn enters the waiting state** (closes a race), and the **read-time fallback** `resume.sync_waiting` in `GET /api/v1/workflows/{id}` and at the start of the next message. See [Human approval](#human-approval-the-admin-page-and-event-driven-resume).
 
 ### Which model answers
 
@@ -247,6 +254,49 @@ The system prompt tells the model to answer only from the excerpts and to say "I
 ### Measured, with caveats
 
 The eval (`scripts/kb_eval.py`) ranks with the thresholds off (hit@1 / hit@3 per mode), then runs hybrid with the real thresholds. Reproduced on the `default` namespace with `gemini-embedding-001` while writing this: vector 21/25 and 24/25, keyword 19/25 and 24/25, hybrid 20/25 and 24/25; 25/25 in-scope questions answered; 5/5 out-of-scope "not found" (after tuning on the same questions). `gemini-embedding-2` printed vector 23/25, keyword 19/25, hybrid 20/25 at hit@1. **Hybrid did not beat vector-only**, and a difference of one or two questions out of 25 is noise. The full printouts are in [`phase-4-report.md`](phase-4-report.md). Nothing is claimed from fake-embedder runs.
+
+## Human approval: the admin page and event-driven resume
+
+A refund above the automatic limit (or one the policy sends to review) is not paid. The executor creates a `pending` approval, the turn ends in `WAITING_FOR_HUMAN`, and an administrator decides **through the existing approval endpoints**. Phase 5 added the page an administrator uses, and the path that tells the waiting customer, **by event**, as soon as the decision is final. Nothing in the executor, the policy engine, the idempotency code or `rules.yaml` changed (`git diff 42ffd59..HEAD` shows no change to any of them).
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Chat page (customer)
+    participant A as Admin page /admin
+    participant API as FastAPI
+    participant DB as PostgreSQL
+    participant RL as outbox relay
+    participant RP as Redpanda
+    participant RC as workflow-resume consumer
+
+    C->>API: POST /chat, a 700 refund
+    API->>DB: refund pending_approval, approval row, turn WAITING_FOR_HUMAN with approval_id and refund_id in the checkpoint
+    API->>DB: finish_waiting once, right after the commit (the race closure): nothing decided yet, nothing changes
+    API-->>C: status waiting_approval
+    A->>API: GET /auth/me, then GET /approvals (admin only)
+    API-->>A: role from the database, items with refund, order, review_reasons and requester_refunds_in_window
+    A->>API: POST /approvals/id/approve (the existing endpoint: executor, policy, SELF_APPROVAL check)
+    API->>DB: decision, then the payout after the commit, refund.approved and refund.completed in the outbox, each in the transaction of its change
+    RL->>RP: publish (key = refund id)
+    RP->>RC: refund.approved, refund.completed (at least once)
+    RC->>DB: ONE transaction: claim in processed_events, find the turn waiting for this refund and this customer, and finish it only if waiting_for is none
+    RC->>RP: commit the offset after the transaction
+    C->>API: GET /workflows/id, every 15 s
+    API-->>C: completed, latest_message "Update: ...", waiting_for null
+```
+
+**What the page is.** `frontend/app/admin/page.tsx` lists approvals (pending, approved, rejected, expired) from `GET /api/v1/approvals`, shows who is signed in from `GET /api/v1/auth/me`, and sends Approve and Reject to the **same** `/approvals/{id}/approve|reject` endpoints any API client would use. Every refusal (`SELF_APPROVAL`, already decided, wrong role) is the backend's own answer shown as it is. A customer who opens `/admin` is shown "You do not have access"; that is display only, the API answers `403` on its own. `GET /auth/me` reads the role from the database, like every other request. The enriched list adds the refund and order summary, `review_reasons` (as the policy engine reported them when the refund was requested, stored in the approval's payload) and `requester_refunds_in_window` (the same count the policy's velocity rule uses), with ids only and no emails. `approvals.expires_at` is returned but nothing sets or enforces it: **approval expiry is deferred**, so the Expired tab is always empty.
+
+**The staff knowledge-base lookup.** `GET /api/v1/admin/knowledge/search` is `require_role(admin)`, so a customer is refused before anything is embedded. The audience comes from the authenticated role in code (`rag/audience.py`: `audiences_for_role`: an administrator gets `customer` and `internal`, anyone else `customer`), never from the request, and the retriever enforces it inside the SQL as before. It writes an `admin.kb_search` audit row (who, the question's length, how many results, how many internal) without the question's text, and holds no transaction open while the question is embedded. The assistant's own `search_knowledge_base` is untouched and stays customer-only, even when an administrator is chatting.
+
+**The resume consumer** (`python -m app.events.consumers.resume`, consumer name `workflow-resume`) is a separate process on the same `EventConsumer` base as the notification consumer, reading the refund topic (`ops.refunds` by default). It handles `refund.approved`, `refund.rejected`, `refund.completed` and `refund.failed` and ignores every other event type. From the event it takes ids only (`refund_id`, `customer_id`); amounts, the decision and the payout status come from the database. It finds the workflow with `status = 'waiting_approval' AND context ->> 'refund_id' = :id` (the partial index of migration `0005`) and the customer's `user_id`, and calls `finish_in_transaction` inside the dedupe transaction: the `processed_events` claim and the finish commit together, so a duplicate delivery does nothing; the Kafka offset is committed afterwards; a message that can never be processed goes to the dead-letter topic. It **never calls the model, never runs a tool and moves no money**; it writes the workflow's state and one assistant message, and nothing else. With no waiting workflow it is a no-op.
+
+**`waiting_for` and the payout rule.** `resume.waiting_for(approval, refund)` says what a waiting turn still waits for: `"approval"` (no decision yet, or a checkpoint the backend cannot verify), `"payout"` (approved, but the refund is still `processing`), or `None` (final). Only a final turn is finished. An approved refund whose payout is still `processing` **stays waiting**; the later `refund.completed` or `refund.failed` event (the reconcile path emits them too) finishes it, so the customer is told "paid" rather than "being processed". The backend returns `waiting_for` in `GET /workflows/{id}` and the page only shows it ("Waiting for human approval" or "Approved, payout in progress").
+
+**The race closure.** The model's final answer takes seconds, and the turn only becomes `waiting_approval` when it commits. An administrator who decides in that window produces an event that finds no waiting workflow, and the consumer would do nothing. So the orchestrator calls `finish_waiting` once right after it commits a waiting turn: a decision committed before that point is seen there, and one committed after it reaches a workflow that is now waiting. Both can happen; the row lock and the status re-check make the second a no-op. Tests force the window with a model whose second call lets an admin decide.
+
+**The read-time fallback is kept.** `GET /workflows/{id}` and the start of the customer's next message still call `sync_waiting`, which is the same `finish_waiting` step. If the relay or the consumer is stopped the customer still gets the answer on the next poll (the page polls immediately, then every 15 s). **That can hide a dead consumer**: the customer sees the right result either way. This is why the Phase 5 demo reads the **database** before it makes any `GET`, and then stops the consumer on purpose to show the fallback doing the work.
 
 ## Request flows as implemented today
 
@@ -412,7 +462,7 @@ sequenceDiagram
     end
 ```
 
-Details, failure handling and the event schema are in [`events.md`](events.md). `relay --once` and `consumers.notifications --once` have a hard overall deadline (default 120 s; exit code 3 with a message naming what they were waiting on) so a hang is a visible failure.
+The diagram shows the notification consumer. The **workflow-resume consumer** is a second consumer of the same topic on the same base class, with the same steps and guarantees (claim and effect in one transaction, offset after, dead letters); its effect is described in [Human approval](#human-approval-the-admin-page-and-event-driven-resume). Details, failure handling and the event schema are in [`events.md`](events.md) (written in Phase 2: it does not cover the resume consumer). `relay --once`, `consumers.notifications --once` and `consumers.resume --once` have a hard overall deadline (default 120 s; exit code 3 with a message naming what they were waiting on) so a hang is a visible failure.
 
 ## Concurrency and locking
 
@@ -425,7 +475,7 @@ Details, failure handling and the event schema are in [`events.md`](events.md). 
 
 ## Data model
 
-Fifteen tables, created by the Alembic migrations `0001` (the eleven Phase 1 tables), `0002` (Phase 2: per-user refund idempotency and `request_hash`, new refund and tool-call states, outbox ordering and parking, the `processed_events` table), `0003` (Phase 3: the `messages` table, and conversation / message identity on `workflow_runs` plus the `escalated` status) and `0004` (Phase 4: `kb_documents` and `kb_chunks`). Generated from the SQLAlchemy metadata (`Base.metadata`), so it matches the code. Types are simplified: `varchar` columns holding a fixed set of values (`status`, `role`, `decision`, …) are enforced by a named `CHECK` constraint; every money column is `numeric(12,2)` next to a `currency` column; all primary keys are UUIDs generated by the application.
+Fifteen tables, created by the Alembic migrations `0001` (the eleven Phase 1 tables), `0002` (Phase 2: per-user refund idempotency and `request_hash`, new refund and tool-call states, outbox ordering and parking, the `processed_events` table), `0003` (Phase 3: the `messages` table, and conversation / message identity on `workflow_runs` plus the `escalated` status), `0004` (Phase 4: `kb_documents` and `kb_chunks`) and `0005` (Phase 5: one partial expression index on `workflow_runs`, no table, column or enum). **Phase 5 added no table and no column, so the diagram below is unchanged**: it was regenerated from the SQLAlchemy metadata (`Base.metadata`) when this was written and has the same 15 tables, columns and foreign keys. It matches the code. Types are simplified: `varchar` columns holding a fixed set of values (`status`, `role`, `decision`, …) are enforced by a named `CHECK` constraint; every money column is `numeric(12,2)` next to a `currency` column; all primary keys are UUIDs generated by the application.
 
 ```mermaid
 erDiagram
@@ -638,12 +688,12 @@ Which tables application code uses today:
 | `users` | Read by login and `get_current_user`; written by login (hash upgrade) and the seed |
 | `orders`, `order_items` | Read by the orders API and the policy facts; `cancel_order` updates orders; written by the seed |
 | `payments` | Read by refunds and the reconcile job; written by the seed |
-| `refunds`, `approvals` | Written and read by the refund and approval tools |
+| `refunds`, `approvals` | Written and read by the refund and approval tools; read (with the order) by the enriched admin approvals list and by the resume code to decide whether a waiting turn is final |
 | `tool_calls`, `audit_logs` | Written by the executor for **every** call, including denied and invalid ones |
 | `outbox_events` | Written in the same transaction as each refund or ticket change; read and updated by the relay and `outbox_admin.py` |
-| `processed_events` | Written by the consumer (the de-duplication ledger) |
+| `processed_events` | Written by the consumers, the notification consumer and the resume consumer (the de-duplication ledger) |
 | `tickets` | Written by the `create_ticket` tool (no HTTP route yet) |
-| `workflow_runs` | One row per chat turn: state and context (the checkpoint), conversation and message ids, the frozen response; written and read by the orchestrator and `GET /workflows/{id}` |
+| `workflow_runs` | One row per chat turn: state and context (the checkpoint), conversation and message ids, the frozen response; written and read by the orchestrator and `GET /workflows/{id}`; a waiting turn is found by refund id and finished by the resume consumer (or the fallback) |
 | `messages` | The chat transcript (user, assistant and tool messages as JSON blocks); written by the orchestrator, read to build the model's history |
 | `kb_documents`, `kb_chunks` | The knowledge base: written only by `scripts/kb_ingest.py`, read by the `search_knowledge_base` tool's SQL. Not touched by any request handler or by policy code |
 
@@ -654,7 +704,7 @@ Constraints that carry weight:
 * `approvals`: at most one *pending* approval per refund (partial unique index).
 * `tool_calls`: size caps on `arguments` and `result`.
 * `processed_events`: primary key `(consumer, event_id)`, which makes a duplicate delivery a no-op.
-* `workflow_runs`: `UNIQUE (conversation_id, message_id)`, `UNIQUE (user_id, message_id)`, and a partial unique index allowing one `running` turn per conversation; the `workflow_status` CHECK includes `escalated`.
+* `workflow_runs`: `UNIQUE (conversation_id, message_id)`, `UNIQUE (user_id, message_id)`, and a partial unique index allowing one `running` turn per conversation; the `workflow_status` CHECK includes `escalated`. Migration `0005` adds `ix_workflow_runs_waiting_refund`, a partial expression index on `(context ->> 'refund_id') WHERE status = 'waiting_approval'`, so the resume consumer's lookup touches only the few turns that are waiting however many turns have run (the downgrade drops it).
 * `messages`: role CHECK (`user`, `assistant`, `tool`), a 32 KiB cap on `content`, and an identity column `seq` for strict order; deleting a user that has messages is refused (`RESTRICT`).
 * `kb_documents`: `UNIQUE (namespace, source)`; `audience` CHECK (`customer`, `internal`). `kb_chunks`: `embedding vector(768)` (the width is a literal in the migration, and the application compares `EMBEDDING_DIM` with it), a **generated, stored** `tsv` column, `UNIQUE (document_id, ordinal)`, `token_count > 0`, an HNSW cosine index and a GIN index; `ON DELETE CASCADE` from the document. The downgrade drops both tables (the knowledge base can be rebuilt with `kb_ingest.py`).
 
@@ -666,11 +716,11 @@ These come from `CLAUDE.md` and are never to be broken. The last column says how
 |---|---|---|---|
 | 1 | The LLM proposes, the backend decides. The LLM never executes anything directly. | A model can be wrong or manipulated (prompt injection), so authority must live in deterministic code that can be tested and audited. | **Built**: every model proposal runs through the executor with `origin="agent"`; admin tools are never shown to the model and are refused if proposed; the prompt-injection tests use a model that obeys everything and prove the backend still refuses |
 | 2 | Every tool call passes schema validation → authorisation → policy engine → execution → `tool_calls` log. | One mandatory chokepoint means nothing runs unchecked and every attempt, allowed or denied, leaves a record. | **Built** (`app/tools/executor.py`); tests check that denied, invalid and failed calls are logged |
-| 3 | Retrieved (RAG) text is data, never instructions. `rules.yaml` always beats any document. | Documents can contain injected instructions; business rules must come from one reviewed source. | **Built** (Phase 4): `rules.yaml` is the only source of thresholds; the policy, refund and executor code does not read documents (a test scans for it); the audience filter is in the retrieval SQL and fixed to `customer` for the agent; excerpts reach the model as allow-listed, delimited, capped data; tests run a gullible model against a lying and a poisoned article and show identical decisions |
-| 4 | Postgres is the source of truth, including workflow state. Redis is disposable (cache, rate limit, idempotency fast path). | Losing Redis must never lose state or change an outcome, and a crashed workflow must be resumable from its last checkpoint. | Postgres holds all state, and idempotency does not use Redis at all. The agent's state machine is checkpointed in `workflow_runs` (state + context) and the transcript is in `messages`; Redis is provisioned but unused |
-| 5 | The frontend contains zero business logic. | A single enforcement point in the backend can't be bypassed or spoofed by modifying a client. | The Next.js page only sends the message and shows the reply, the backend-built tool outcomes and the waiting state; every decision is the API's |
+| 3 | Retrieved (RAG) text is data, never instructions. `rules.yaml` always beats any document. | Documents can contain injected instructions; business rules must come from one reviewed source. | **Built** (Phase 4): `rules.yaml` is the only source of thresholds; the policy, refund and executor code does not read documents (a test scans for it); the audience filter is in the retrieval SQL and fixed to `customer` for the agent; excerpts reach the model as allow-listed, delimited, capped data; tests run a gullible model against a lying and a poisoned article and show identical decisions. Phase 5: administrators read internal documents only through the staff lookup (no model, audience from the role in code); the assistant's search stays customer-only even when an administrator is chatting |
+| 4 | Postgres is the source of truth, including workflow state. Redis is disposable (cache, rate limit, idempotency fast path). | Losing Redis must never lose state or change an outcome, and a crashed workflow must be resumable from its last checkpoint. | Postgres holds all state, and idempotency does not use Redis at all. The agent's state machine is checkpointed in `workflow_runs` (state + context) and the transcript is in `messages`; a waiting turn is found and finished from Postgres rows (the event only says which refund; the database says what happened). Redis is provisioned but unused |
+| 5 | The frontend contains zero business logic. | A single enforcement point in the backend can't be bypassed or spoofed by modifying a client. | The Next.js pages only send messages and decisions and show what the API says: the reply, the backend-built tool outcomes, the waiting state (`waiting_for`, computed by the backend) and, on `/admin`, the approvals with their review reasons. Approve and Reject go through the existing executor endpoints; the page's role check is display only and the API answers `403` itself |
 | 6 | Refunds are idempotent: `Idempotency-Key` plus a database `UNIQUE` constraint. | Retries, double-clicks and repeated LLM proposals must never pay out twice; the database is the final arbiter even if Redis is wrong. | **Built and concurrency-tested** (10 simultaneous identical requests make one refund and one payout). Through the agent the key is derived by the backend, and a client `message_id` makes a retried chat message a replay |
-| 7 | Events go through a transactional outbox, never published directly from request handlers. | The state change and its event commit atomically, so a broker outage can neither lose an event nor emit one for a rolled-back change. | **Built**: outbox writer, relay, consumer. A test (`test_no_direct_publish.py`) scans the source and fails if anything other than the event modules imports a Kafka client, builds an `OutboxEvent` by hand, or calls `add_event` from an unexpected place |
+| 7 | Events go through a transactional outbox, never published directly from request handlers. | The state change and its event commit atomically, so a broker outage can neither lose an event nor emit one for a rolled-back change. | **Built**: outbox writer, relay, consumer. A test (`test_no_direct_publish.py`) scans the source and fails if anything other than the event modules imports a Kafka client, builds an `OutboxEvent` by hand, or calls `add_event` from an unexpected place. The resume consumer publishes no events (it reads them and writes workflow rows); it is on that test's allow-list only to build its dead-letter producer |
 
 ## Module layout
 
@@ -696,6 +746,7 @@ Taken from `git ls-files` for `backend/` and `scripts/` (so it is what exists no
 │   │   │   └── tools_view.py
 │   │   ├── api/
 │   │   │   ├── routers/
+│   │   │   │   ├── admin.py
 │   │   │   │   ├── approvals.py
 │   │   │   │   ├── auth.py
 │   │   │   │   ├── chat.py
@@ -731,7 +782,8 @@ Taken from `git ls-files` for `backend/` and `scripts/` (so it is what exists no
 │   │   │   │   │   ├── 0001_initial_schema.py
 │   │   │   │   │   ├── 0002_phase2_refunds_outbox_policy.py
 │   │   │   │   │   ├── 0003_agent_messages_workflow.py
-│   │   │   │   │   └── 0004_knowledge_base.py
+│   │   │   │   │   ├── 0004_knowledge_base.py
+│   │   │   │   │   └── 0005_workflow_resume_index.py
 │   │   │   │   ├── README
 │   │   │   │   ├── env.py
 │   │   │   │   └── script.py.mako
@@ -757,7 +809,8 @@ Taken from `git ls-files` for `backend/` and `scripts/` (so it is what exists no
 │   │   ├── events/
 │   │   │   ├── consumers/
 │   │   │   │   ├── base.py
-│   │   │   │   └── notifications.py
+│   │   │   │   ├── notifications.py
+│   │   │   │   └── resume.py
 │   │   │   ├── admin.py
 │   │   │   ├── envelope.py
 │   │   │   ├── kafka.py
@@ -771,6 +824,7 @@ Taken from `git ls-files` for `backend/` and `scripts/` (so it is what exists no
 │   │   │   │   ├── schemas.py
 │   │   │   │   └── service.py
 │   │   │   ├── refunds/
+│   │   │   │   ├── approvals_view.py
 │   │   │   │   ├── hashing.py
 │   │   │   │   ├── payments.py
 │   │   │   │   ├── reconcile.py
@@ -788,6 +842,7 @@ Taken from `git ls-files` for `backend/` and `scripts/` (so it is what exists no
 │   │   │   ├── rules.yaml
 │   │   │   └── types.py
 │   │   ├── rag/
+│   │   │   ├── audience.py
 │   │   │   ├── chunker.py
 │   │   │   ├── embedder.py
 │   │   │   ├── eval.py
@@ -820,12 +875,14 @@ Taken from `git ls-files` for `backend/` and `scripts/` (so it is what exists no
     │   ├── commit3.json
     │   ├── commit4.json
     │   ├── commit5.json
+    │   ├── phase5.json
     │   ├── rag.json
     │   └── run.py
     ├── demo_cleanup.py
     ├── demo_phase2.py
     ├── demo_phase3.py
     ├── demo_phase4.py
+    ├── demo_phase5.py
     ├── kafka_smoke.py
     ├── kb_eval.py
     ├── kb_ingest.py
@@ -840,25 +897,25 @@ Taken from `git ls-files` for `backend/` and `scripts/` (so it is what exists no
 | `app/main.py` | App factory, lifespan (engine and Redis cleanup), middleware and router wiring |
 | `app/api/middleware.py` | `RequestIDMiddleware`: validates or generates `X-Request-ID`, binds it to logs, writes the access log line |
 | `app/api/deps.py` | `get_current_user`, `require_role`, `get_redis`, `get_session` |
-| `app/api/routers/` | Thin HTTP layer: `health`, `auth`, `orders`, `refunds`, `approvals`, `chat`, `workflows` |
+| `app/api/routers/` | Thin HTTP layer: `health`, `auth` (login, `/me`), `orders`, `refunds`, `approvals` (the enriched list, approve, reject), `chat`, `workflows`, `admin` (the staff knowledge-base lookup) |
 | `app/api/tool_responses.py` | Maps a tool outcome (status, decision, reason code) onto the HTTP response |
 | `app/core/config.py` | `pydantic-settings` configuration, the production JWT-secret guard, `configured_app_env()` / `dev_only_refusal()` for the dev-only scripts |
 | `app/core/security.py`, `jsonutil.py`, `logging.py` | argon2 and JWT (HS256 pinned); JSON-safe/capped serialisation; structlog |
 | `app/db/base.py`, `session.py`, `locking.py` | Declarative base and mixins; async engine and session; the row-lock helpers and **the** lock order |
 | `app/db/models/` | One file per aggregate, plus `enums.py` (VARCHAR + CHECK enums) |
-| `app/db/migrations/` | Async Alembic environment; `0001` initial schema (includes `CREATE EXTENSION vector`), `0002` Phase 2 schema, `0003` Phase 3 schema, `0004` the knowledge base |
+| `app/db/migrations/` | Async Alembic environment; `0001` initial schema (includes `CREATE EXTENSION vector`), `0002` Phase 2 schema, `0003` Phase 3 schema, `0004` the knowledge base, `0005` the waiting-turn index |
 | `app/db/vector.py` | The pgvector column type and `vector_literal()` (no extra dependency) |
 | `app/policy/` | `engine.py` (pure decision functions), `rules.py` (loading and validation), `types.py`, `rules.yaml` (all thresholds) |
 | `app/tools/` | `registry.py` (specs, roles, `agent_visible`), `schemas.py` (inputs), `executor.py` (the pipeline), `context.py`, `default.py` (the default registry), `handlers/` (orders, tickets, refunds, knowledge) |
-| `app/agent/` | `orchestrator.py` (a turn: the tool loop, caps, replay, failure handling), `fsm.py` (states and legal transitions), `keys.py` (derived idempotency keys), `tools_view.py` (what the model sees, plus the Gemini schema mapping), `results_view.py` (allow-listed, capped tool results), `history.py`, `prompts.py`, `store.py` (messages and checkpoints), `resume.py` (the approval sync stub), `llm/` (`base.py` interface, `gemini.py`, `fake.py`, `factory.py`) |
-| `app/rag/` | `embedder.py` (interface, fake, Gemini), `factory.py`, `kb.py` (load and render documents, the number-consistency check), `chunker.py`, `ingest.py`, `retriever.py`, `guards.py`, `eval.py`; the data is in `app/data/kb/` and `app/data/kb_eval/` |
+| `app/agent/` | `orchestrator.py` (a turn: the tool loop, caps, replay, failure handling), `fsm.py` (states and legal transitions), `keys.py` (derived idempotency keys), `tools_view.py` (what the model sees, plus the Gemini schema mapping), `results_view.py` (allow-listed, capped tool results), `history.py`, `prompts.py`, `store.py` (messages and checkpoints), `resume.py` (`finish_waiting`, `waiting_for`, the read-time fallback), `llm/` (`base.py` interface, `gemini.py`, `fake.py`, `factory.py`) |
+| `app/rag/` | `embedder.py` (interface, fake, Gemini), `factory.py`, `kb.py` (load and render documents, the number-consistency check), `chunker.py`, `ingest.py`, `retriever.py`, `audience.py` (the one place that maps a role to audiences), `guards.py`, `eval.py`; the data is in `app/data/kb/` and `app/data/kb_eval/` |
 | `app/modules/orders/`, `users/`, `tickets/` | Service and repo layers. Authorisation scoping lives in the orders repo/service |
-| `app/modules/refunds/` | `service.py` (facts, events), `repo.py` (idempotent insert), `hashing.py` (canonical request hash), `payments.py` (provider interface, simulated provider, payout phases), `reconcile.py` |
+| `app/modules/refunds/` | `service.py` (facts, events), `repo.py` (idempotent insert), `hashing.py` (canonical request hash), `payments.py` (provider interface, simulated provider, payout phases), `reconcile.py`, `approvals_view.py` (the read-only view for the admin list) |
 | `app/modules/audit.py` | Writes `audit_logs` rows |
-| `app/events/` | `outbox.py` (writer, field allow-list), `envelope.py` (version 1), `relay.py`, `consumers/` (base class + notifications), `kafka.py` (producer and consumer wrappers), `runtime.py` (signals, `--once` deadline), `admin.py` (unpark), `types.py` |
-| `scripts/` | `seed.py`; `demo_phase2.py`, `demo_phase3.py`, `demo_phase4.py` and `demo_cleanup.py` (dev only); `kb_ingest.py` and `kb_eval.py` (the knowledge base); `reconcile_refunds.py`, `outbox_admin.py`, `kafka_smoke.py`, `llm_smoke.py` (two real calls to Gemini with your own key); `mutation/` (runner and seven lists, 84 mutations) |
-| `frontend/` | Next.js 16.4.0, React 19.3.0, TypeScript 7.0.2, Tailwind: one page (login and chat), a same-origin proxy to the API (no CORS), an error boundary; no business logic |
+| `app/events/` | `outbox.py` (writer, field allow-list), `envelope.py` (version 1), `relay.py`, `consumers/` (base class, notifications, resume), `kafka.py` (producer and consumer wrappers), `runtime.py` (signals, `--once` deadline), `admin.py` (unpark), `types.py` |
+| `scripts/` | `seed.py`; `demo_phase2.py`, `demo_phase3.py`, `demo_phase4.py`, `demo_phase5.py` and `demo_cleanup.py` (dev only); `kb_ingest.py` and `kb_eval.py` (the knowledge base); `reconcile_refunds.py`, `outbox_admin.py`, `kafka_smoke.py`, `llm_smoke.py` (two real calls to Gemini with your own key); `mutation/` (runner and eight lists, 93 mutations) |
+| `frontend/` | Next.js 16.4.0, React 19.3.0, TypeScript 7.0.2, Tailwind: two pages (login and chat at `/`, the admin approvals page at `/admin`), a shared auth helper (`lib/auth.ts`), a same-origin proxy to the API (no CORS), an error boundary; no business logic |
 
-Tests are in `backend/app/tests/`: **1063 tests** (`pytest --collect-only -q`) in 51 test files, plus shared helpers (`conftest.py` with the real-Postgres fixtures and the `committed_db` fixture for concurrency tests, `factories.py`, `tokens.py`, `policy_helpers.py`, `event_helpers.py`, `worlds.py` for building a customer/admin/order scenario, `agent_helpers.py` for an orchestrator wired to the real executor, and a golden snapshot of the Gemini tool declarations). 28 of them use the real Redpanda and carry the `kafka` marker; `pytest -m "not kafka"` runs the other 1035 with Postgres only.
+Tests are in `backend/app/tests/`: **1137 tests** (`pytest --collect-only -q`) in 59 `test_*.py` files, plus shared helpers (`conftest.py` with the real-Postgres fixtures and the `committed_db` fixture for concurrency tests, `factories.py`, `tokens.py`, `policy_helpers.py`, `event_helpers.py`, `worlds.py` for building a customer/admin/order scenario, `agent_helpers.py` for an orchestrator wired to the real executor, and a golden snapshot of the Gemini tool declarations). 30 of them use the real Redpanda and carry the `kafka` marker; `pytest -m "not kafka"` runs the other 1107 with Postgres only. Phase 5 added `resume_helpers.py` and seven test files (65 tests): `test_migration_0005`, `test_resume_workflow`, `test_resume_race`, `test_resume_consumer`, `test_resume_consumer_kafka` (the two Redpanda-backed ones), `test_admin_api` and `test_staff_kb_search`.
 
-**Planned but not created yet:** an admin approvals page and event-driven resume (Phase 5). `CLAUDE.md` lists `answerer` under `rag/`; there is none, because the assistant model writes the answer from the retrieved excerpts.
+**Planned but not created yet:** resilience, observability and evals (Phase 6), and polish (Phase 7); approval expiry is deferred. `CLAUDE.md` lists `answerer` under `rag/`; there is none, because the assistant model writes the answer from the retrieved excerpts.
