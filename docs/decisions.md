@@ -32,8 +32,8 @@ Short architecture decision records (ADRs). Each has the context, the decision, 
 | 26 | [Hard limits, and what happens when the model fails](#26-hard-limits-and-what-happens-when-the-model-fails) | In place (Phase 3) |
 | 27 | [A gullible fake model by default; Gemini over plain httpx for real](#27-a-gullible-fake-model-by-default-gemini-over-plain-httpx-for-real) | In place (Phase 3) |
 | 28 | [Conversations and workflows are owner-only, even for administrators](#28-conversations-and-workflows-are-owner-only-even-for-administrators) | In place (Phase 3) |
-| 29 | [Waiting for approval is a read-time sync stub](#29-waiting-for-approval-is-a-read-time-sync-stub) | In place as a stub (Phase 5 replaces it) |
-| 30 | [A minimal frontend with no business logic](#30-a-minimal-frontend-with-no-business-logic) | In place (Phase 3; source chips in Phase 4) |
+| 29 | [Waiting for approval is a read-time sync stub](#29-waiting-for-approval-is-a-read-time-sync-stub) | In place, now the **fallback**; the event path is decision 38 (Phase 5) |
+| 30 | [A minimal frontend with no business logic](#30-a-minimal-frontend-with-no-business-logic) | In place (Phase 3; source chips in Phase 4; the admin page in Phase 5, decision 41) |
 | 31 | [Retrieval is one read-only tool behind the same executor](#31-retrieval-is-one-read-only-tool-behind-the-same-executor) | In place (Phase 4) |
 | 32 | [The audience filter is in the SQL, and the agent only ever sees customer documents](#32-the-audience-filter-is-in-the-sql-and-the-agent-only-ever-sees-customer-documents) | In place (Phase 4) |
 | 33 | [Hybrid search, and "nothing relevant" decided on absolute scores](#33-hybrid-search-and-nothing-relevant-decided-on-absolute-scores) | In place (Phase 4); hybrid is not shown to beat vector-only |
@@ -41,6 +41,12 @@ Short architecture decision records (ADRs). Each has the context, the decision, 
 | 35 | [Excerpts are data: allow-listed, delimited, capped; sources come from the backend](#35-excerpts-are-data-allow-listed-delimited-capped-sources-come-from-the-backend) | In place (Phase 4) |
 | 36 | [Documents are rendered from `rules.yaml`, and ingest is atomic per document](#36-documents-are-rendered-from-rulesyaml-and-ingest-is-atomic-per-document) | In place (Phase 4) |
 | 37 | [The eval is honest about what it can show](#37-the-eval-is-honest-about-what-it-can-show) | In place (Phase 4) |
+| 38 | [A waiting turn is finished by event; the read-time sync stays as a fallback](#38-a-waiting-turn-is-finished-by-event-the-read-time-sync-stays-as-a-fallback) | In place (Phase 5) |
+| 39 | [The decide-before-waiting race is closed by looking once after the turn starts waiting](#39-the-decide-before-waiting-race-is-closed-by-looking-once-after-the-turn-starts-waiting) | In place (Phase 5) |
+| 40 | [An approved refund that is still processing keeps the turn waiting](#40-an-approved-refund-that-is-still-processing-keeps-the-turn-waiting) | In place (Phase 5) |
+| 41 | [The admin page is display only; decisions go through the existing endpoints](#41-the-admin-page-is-display-only-decisions-go-through-the-existing-endpoints) | In place (Phase 5) |
+| 42 | [Staff read internal documents through an endpoint, not a tool](#42-staff-read-internal-documents-through-an-endpoint-not-a-tool) | In place (Phase 5) |
+| 43 | [Approval expiry is deferred](#43-approval-expiry-is-deferred) | **Deferred** (the column exists; nothing sets or enforces it) |
 
 ---
 
@@ -292,6 +298,8 @@ Short architecture decision records (ADRs). Each has the context, the decision, 
 
 **Trade-off.** Polling, with up to 5 s of delay, and a GET with a side effect that must be explained in a comment. It is a stub on purpose: Phase 5 replaces it with a consumer of the `refund.*` events, and the state machine (`WAITING_FOR_HUMAN → DONE`) does not change.
 
+**Update (Phase 5).** Done as planned in [decision 38](#38-a-waiting-turn-is-finished-by-event-the-read-time-sync-stays-as-a-fallback), with one change to the plan: the sync was **not** removed. It is now the fallback for a stopped consumer, and the page polls every 15 s instead of 5 s because the event normally does the work.
+
 ## 30. A minimal frontend with no business logic
 
 **Context.** Golden rule 5: the frontend contains zero business logic.
@@ -302,7 +310,9 @@ Short architecture decision records (ADRs). Each has the context, the decision, 
 
 **Phase 4.** The page shows a "Sources consulted:" row of chips under an answer, taken from the `sources` the backend returns; it adds no logic (it does not decide what is a source). In headless Edge 155 against private copies of the API and the page (fake model, fake embedder), a shipping question showed the chips, an off-topic one showed none, a 700 refund showed the waiting banner, and the console had no errors (a script outside the repository).
 
-**Trade-off.** No frontend tests live in the repo, so only `tsc` and `next build` guard the page; a browser-level test is the open item if the UI grows.
+**Phase 5.** A second page, `/admin` ([decision 41](#41-the-admin-page-is-display-only-decisions-go-through-the-existing-endpoints)), and a shared `lib/auth.ts` (the token store and two helpers). The chat page now polls immediately and then every 15 s, and shows "Waiting for human approval" or "Approved, payout in progress." from the backend's `waiting_for`. In headless Edge 155 against private copies of the API and the page (fake model, fake embedder), a customer's 700 refund showed the waiting banner, the admin page showed the request, approving finished the customer's turn without a reload, and the console had no errors or warnings (a script outside the repository; the first run of it clicked the "Approved" tab instead of the Approve button, a bug in the script, and was rerun). A favicon request that returned 404 in that check was fixed with `app/icon.svg`.
+
+**Trade-off.** No frontend tests live in the repo, so only `tsc` and `next build` guard the page; a browser-level test is the open item if the UI grows. `tsc` fails under the default Node 18 on the development machine; Node 24 was used.
 
 ## 31. Retrieval is one read-only tool behind the same executor
 
@@ -359,3 +369,51 @@ Short architecture decision records (ADRs). Each has the context, the decision, 
 **Decision.** The golden set (25 in-scope questions, many of them paraphrases, and 5 out-of-scope ones) counts a hit only if the retrieved chunk comes from the expected document **and** holds a stated fragment, and a test checks that every fragment really occurs in its document. Ranking (hit@1, hit@3) is measured with the thresholds **off**, per mode; the thresholds are measured separately. With the fake embedder the tests only check plumbing, the audience filter, thresholds, atomic ingest and that the five out-of-scope questions come back "not found"; no comparison of modes is claimed from fake numbers. Real quality is reported only from real-embedder runs. One run of the real eval exposed a bug, not a result: the keyword leg's top 3 differed between two runs because equal ranks were tied arbitrarily, which made hybrid look 2 questions better than it was. Ties are now broken deterministically and the numbers were re-run. A mutation check initially "survived" (`K6`), because the mutation was **equivalent** (a dictionary already de-duplicated by key); it was retargeted at the per-turn de-duplication that really matters and is now caught.
 
 **Trade-off.** Thirty questions cannot separate two good systems, the thresholds and the evaluation share the same questions, and nothing here measures whether the final answer was *correct*, only whether the right passage was retrieved. An out-of-sample set and an answer-level eval belong to Phase 6.
+
+## 38. A waiting turn is finished by event; the read-time sync stays as a fallback
+
+**Context.** A chat turn that needs a human ends `waiting_approval` ([decision 29](#29-waiting-for-approval-is-a-read-time-sync-stub)). Polling a GET that writes works, but it leaves the customer waiting for their next poll and does nothing when nobody is looking. The event pipeline already publishes `refund.approved`, `refund.rejected`, `refund.completed` and `refund.failed` through the outbox (golden rule 7), so the decision can carry itself to the turn.
+
+**Decision.** A separate process, `python -m app.events.consumers.resume` (consumer name `workflow-resume`), on the same `EventConsumer` base as the notification consumer. For each of those four events it finds the turn waiting for that refund (`status = 'waiting_approval' AND context ->> 'refund_id' = :id`, plus the customer the event names) and calls the shared `finish_in_transaction`, inside the base class's dedupe transaction: the `processed_events` claim and the finish commit together, the Kafka offset is committed after, and an unprocessable message goes to the dead-letter topic. Migration `0005` adds a partial expression index on exactly that lookup (`WHERE status = 'waiting_approval'`), so it touches only the few waiting turns however many have run. The consumer **reads ids only from the event** and takes the amount, the decision and the payout status from the database, so a wrong or replayed event cannot say "paid" about a refund that is not. It never calls the model, never runs a tool and moves no money: it writes the workflow's state and one templated assistant message. With no waiting workflow it does nothing. The Phase 3 read-time sync is **kept** and now calls the same `finish_waiting`, so the consumer and the fallback are one transition and cannot add two messages.
+
+**Trade-off.** It is a fourth process to run (API, relay, consumer, page). The fallback **can hide a dead consumer**: a customer gets the right answer either way, so nothing on the page shows that the consumer is down; a later phase should add a health check or an alert, and until then `workflow_resumed` log lines are the signal. That is why `scripts/demo_phase5.py` reads the **database** before it makes any GET (the turn must already be finished by the event), and then stops the consumer by PID to show the fallback. Nothing in the executor, the policy engine, the idempotency code or `rules.yaml` changed (`git diff 42ffd59..HEAD` shows none).
+
+## 39. The decide-before-waiting race is closed by looking once after the turn starts waiting
+
+**Context.** The turn becomes `waiting_approval` only when it commits its final answer, and the model takes seconds to write that answer. An administrator can approve in that window. The event is published, the consumer looks for a waiting turn, finds none and does nothing, and nobody ever tells the customer.
+
+**Decision.** Right after the orchestrator commits a waiting turn, it calls `finish_waiting` once. A decision committed before that call is seen there; one committed after it is delivered to a turn that is now waiting. Both can happen, and the row lock plus the status re-check make the second a no-op. It never calls the model or a tool. Tests force the window with a scripted model whose second call lets an admin decide, and mutation `P5` (the closure removed) is caught by `test_an_approval_decided_during_the_final_answer_still_finishes_the_turn`.
+
+**Trade-off.** One extra locked read per waiting turn. The fallback would also catch the stranded turn on the customer's next GET, but that only helps a customer who is polling.
+
+## 40. An approved refund that is still processing keeps the turn waiting
+
+**Context.** Approving a refund commits the decision and then pays out after the commit. In between, and again whenever the provider's answer is unknown until `reconcile_refunds.py` resolves it, the refund is `processing`. Finishing the turn then would tell the customer "approved" with no outcome, or have to guess "paid".
+
+**Decision.** `resume.waiting_for(approval, refund)` returns `"approval"` (no decision yet, or a checkpoint the backend cannot verify), `"payout"` (approved, refund `processing`) or `None` (final). Only a final turn is finished, by the consumer **and** by the fallback (the same function). The later `refund.completed` or `refund.failed` event finishes it; the reconcile path emits those events (tested). `GET /workflows/{id}` returns `waiting_for` computed by the backend, and the page only displays it ("Waiting for human approval" or "Approved, payout in progress."). An unusable checkpoint (no approval or refund, or a refund that belongs to another user) counts as "approval" and is never finished.
+
+**Trade-off.** A turn can wait longer than the human decision when the payout is slow or uncertain. That is the point: the customer is told what happened, not what was hoped.
+
+## 41. The admin page is display only; decisions go through the existing endpoints
+
+**Context.** Golden rule 5: the frontend contains zero business logic. An approvals page is where it would be easiest to break that, for example by hiding a button for the requester's own refund and calling that enforcement.
+
+**Decision.** `/admin` lists approvals (pending, approved, rejected, expired) from `GET /api/v1/approvals`, shows the signed-in user from `GET /api/v1/auth/me`, and sends Approve and Reject to the **existing** `/approvals/{id}/approve|reject` endpoints (the executor tools). Whatever the backend answers, including `SELF_APPROVAL`, an already-decided approval or a `403`, is shown as it is. The page's role check only chooses what to draw: a customer sees "You do not have access to this page." and the page requests nothing admin-only, but the API answers `403` on its own. `GET /auth/me` reads the role from the database, like every request, so a token that claims `role: admin` is a customer. The enriched list is read-only and adds ids only (no emails or names): the refund and order summary, `review_reasons` and `review_text` (as the policy engine reported them when the refund was requested, stored in the approval's payload), `requester_refunds_in_window` (the same count the velocity rule uses), and `decided_by`, `decided_at`, `decision_reason`.
+
+**Trade-off.** The list is oldest first and shows every pending approval in the database, old ones included, with no filter or paging beyond the first 50. After a decision the card leaves the Pending tab with its "Approved." confirmation, so a decision is visible only in the Approved or Rejected tab (an open item, not fixed). Requesters appear as id prefixes, which is less friendly than a name and deliberate. A test confirms a customer gets `403` on the list and that the assistant cannot decide even when an administrator is the one chatting.
+
+## 42. Staff read internal documents through an endpoint, not a tool
+
+**Context.** The knowledge base has `internal` documents (an approvals playbook, fraud notes) that administrators should be able to read. [Decision 32](#32-the-audience-filter-is-in-the-sql-and-the-agent-only-ever-sees-customer-documents) made the assistant customer-only for every caller, an administrator included, so that internal text can never reach a customer through the model.
+
+**Decision.** `GET /api/v1/admin/knowledge/search?q=` is an endpoint, not a tool: `require_role(admin)` (a customer gets `403` before anything is embedded or searched), it calls the retriever directly, and the model is not involved. The audience comes from `rag/audience.audiences_for_role(role)` (an administrator gets `customer` and `internal`, anyone else `customer`): from the authenticated role in code, never from the request. The retriever still enforces it inside the SQL. Every search writes an `admin.kb_search` audit row (who, the question's length, how many results, how many internal) **without the question's text**, and no database transaction is open while the question is embedded. The assistant's `search_knowledge_base` is unchanged and stays customer-only; the function that maps roles to audiences is not used by it (a test pins this).
+
+**Trade-off.** Staff see a retrieval result (excerpts and scores), not an answer, and there is a second way into the knowledge base to keep correct, which is why the mapping lives in one function and the role check in one dependency. The tests include a customer's `403` and mutations `P2` (the role check removed) and `P3` (the mapping gives internal documents to every role), both caught.
+
+## 43. Approval expiry is deferred
+
+**Context.** `approvals.expires_at` and the `expired` status exist from Phase 2, and the page has an Expired tab and the resume text has an "expired" message. Nothing sets `expires_at` or moves an approval to `expired`.
+
+**Decision.** Not built in Phase 5. The column is returned by the API (always null) and the Expired tab is always empty ("Nothing expired."); the page does not claim that approvals expire. Building it needs a policy decision (how long, and what happens to the refund and to the waiting customer) and a job to enforce it, which belongs with resilience in Phase 6.
+
+**Trade-off.** A request nobody decides waits forever and its customer waits with it. Also not built in Phase 5, on purpose: admin access to customers' chat transcripts (workflows and conversations stay owner-only, administrators included, decision 28), login rate limiting, token revocation and Redis rate limiting.
