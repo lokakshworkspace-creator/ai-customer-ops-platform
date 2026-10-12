@@ -66,4 +66,5 @@ extend-immutable-calls = [
 "../scripts/demo_phase2.py" = ["E501"]  # human-readable output strings
 "../scripts/demo_phase3.py" = ["E501"]  # human-readable output strings
 "../scripts/demo_phase5.py" = ["E501", "ASYNC109"]  # output strings; a polling helper named timeout
+"../scripts/demo_phase6.py" = ["E501", "ASYNC109"]  # output strings; the polling helper reused from phase 5
 "../scripts/kb_ingest.py" = ["E501"]  # human-readable output strings
