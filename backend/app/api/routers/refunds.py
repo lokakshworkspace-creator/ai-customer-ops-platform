@@ -42,7 +42,7 @@ Request a refund for one of your orders. **Policy decides** (rules live in `rule
 | Within limits: paid out at once | **201** | `refund.status` is `succeeded`, or `failed` if the payment provider declined |
 | Needs a human (over the automatic limit, 4th refund in 30 days, reason needing review, ...) | **202** | `refund.status = pending_approval`, plus an `approval_id` |
 | Payout outcome unknown (provider timeout) | **202** | `refund.status = processing`; it is retried automatically |
-| Same `Idempotency-Key` + same payload again | **200** | the original refund, header `Idempotent-Replayed: true` |
+| Same `Idempotency-Key` + same payload again | **200** | the original refund, header `Idempotent-Replayed: true` (its `status` may by then be `rejected` or `expired`: a refund nobody decided within the time limit ends as `expired`, nothing is paid) |
 | Same `Idempotency-Key`, different payload | **409** | `IDEMPOTENCY_KEY_REUSED` |
 | Forbidden by policy (too old, over the order total, not refundable, ...) | **403** | `code` and a human `detail`; nothing is created |
 | Order missing **or not yours** | **404** | identical for both |

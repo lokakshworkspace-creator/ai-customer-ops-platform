@@ -3,8 +3,9 @@
     python -m app.events.consumers.resume           # forever, until SIGINT / SIGTERM
     python -m app.events.consumers.resume --once    # drain the backlog, then exit
 
-When an administrator approves or rejects a refund (or its payout finishes), the outbox relay
-publishes `refund.approved` / `refund.rejected` / `refund.completed` / `refund.failed`. This
+When an administrator approves or rejects a refund, nobody decides it in time, or its payout
+finishes, the outbox relay publishes `refund.approved` / `refund.rejected` / `refund.expired` /
+`refund.completed` / `refund.failed`. This
 consumer finds the chat turn waiting for that refund and finishes it with the same templated
 message the read-time fallback would write (app/agent/resume.py). It NEVER calls the model and
 NEVER runs a tool: it only reads the refund, the approval and the workflow, and writes the
@@ -55,6 +56,7 @@ RESUME_EVENTS = frozenset(
     {
         EventType.REFUND_APPROVED.value,
         EventType.REFUND_REJECTED.value,
+        EventType.REFUND_EXPIRED.value,
         EventType.REFUND_COMPLETED.value,
         EventType.REFUND_FAILED.value,
     }

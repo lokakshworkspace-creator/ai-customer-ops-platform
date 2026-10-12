@@ -57,10 +57,11 @@ Common fields of every refund event: `refund_id`, `order_id`, `customer_id` (the
 | `refund.completed` | The provider paid it out; status `succeeded`. | `provider_ref` (the provider's reference) |
 | `refund.failed` | The provider declined it; status `failed`. | `failure_code` (a code such as `PAYOUT_DECLINED`, never the provider's text) |
 | `refund.rejected` | An admin rejected it; status `rejected`. | `rejected_by` (admin user id) |
+| `refund.expired` | Nobody decided within the approval time limit (Phase 6, written by the sweeper); status `expired`, nothing was paid. | none (there is no actor to name) |
 
 Typical sequences for one refund: `requested, approved, completed` (small refund);
 `requested` ... later `approved, completed` (needed approval); `requested, rejected`;
-`requested, approved, failed`. [`test_an_auto_approved_refund_travels_...`,
+`requested, approved, failed`; `requested, expired` (nobody decided in time). [`test_an_auto_approved_refund_travels_...`,
 `test_the_approval_path_declined_payouts_rejections_and_tickets_all_flow`]
 
 ### Ticket events (`aggregate_type = ticket`, `aggregate_id = ticket_id`)

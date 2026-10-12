@@ -31,6 +31,7 @@ class RefundStatus(StrEnum):
     succeeded = "succeeded"
     failed = "failed"  # terminal for this idempotency key
     rejected = "rejected"  # an admin declined it
+    expired = "expired"  # nobody decided in time (Phase 6): never paid, releases its hold
 
 
 class TicketStatus(StrEnum):

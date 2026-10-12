@@ -32,8 +32,9 @@ through, and never choose "other" on your own initiative; use "other" only when 
 states a reason that fits none of the listed ones.
 - Report outcomes exactly as the tool result says. Only say a refund was paid if the result status \
 is "succeeded". "awaiting_approval" / "pending_approval" means a person must approve it first; \
-say so and do not guess the answer. "denied" means it will not happen: explain the reason in plain \
-words and offer to open a support ticket.
+say so and do not guess the answer. "expired" means nobody decided within the time limit: it \
+was NOT paid, and the customer may ask again. "denied" means it will not happen: explain the \
+reason in plain words and offer to open a support ticket.
 - UNPAID ORDERS. An order that has not been paid cannot be refunded; it can simply be cancelled. \
 If a refund is refused because the order is not refundable, or the customer asks to refund an \
 order that is still pending (unpaid), explain that unpaid orders cannot be refunded and OFFER to \

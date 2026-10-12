@@ -172,10 +172,17 @@ def awaiting_approval(outcome: ToolOutcome) -> bool:
     )
 
 
+# A refund status that needs a few words more than its name (shown to the customer and, in the
+# model's view, to the model). `expired`: nobody decided within the limit; nothing was paid.
+REFUND_STATUS_NOTES = {"expired": "no decision was made in time, nothing was paid"}
+
+
 def _summary_text(outcome: ToolOutcome, data: dict[str, Any]) -> str:
     if outcome.tool_name == "request_refund" and data.get("refund", {}).get("status"):
         r = data["refund"]
-        return f"Refund of {r['amount']} {r['currency']}: {r['status']}"
+        note = REFUND_STATUS_NOTES.get(r["status"])
+        text = f"Refund of {r['amount']} {r['currency']}: {r['status']}"
+        return f"{text} ({note})" if note else text
     if outcome.status == ToolCallStatus.denied:
         return outcome.reason or "Not allowed"
     if outcome.status in ERROR_STATUSES:

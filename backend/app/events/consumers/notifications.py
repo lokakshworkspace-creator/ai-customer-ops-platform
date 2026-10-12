@@ -34,6 +34,7 @@ MESSAGES = {
     "refund.completed": "refund {refund_id} was paid out",
     "refund.failed": "refund {refund_id} could not be paid out",
     "refund.rejected": "refund {refund_id} was rejected",
+    "refund.expired": "refund {refund_id} expired without a decision",
     "ticket.created": "support ticket {ticket_id} was opened",
 }
 

@@ -7,6 +7,7 @@ class EventType(StrEnum):
     REFUND_COMPLETED = "refund.completed"
     REFUND_FAILED = "refund.failed"
     REFUND_REJECTED = "refund.rejected"
+    REFUND_EXPIRED = "refund.expired"
     TICKET_CREATED = "ticket.created"
 
 
@@ -39,6 +40,7 @@ EVENT_DATA_FIELDS: dict[EventType, frozenset[str]] = {
     EventType.REFUND_COMPLETED: _REFUND_BASE | {"provider_ref"},
     EventType.REFUND_FAILED: _REFUND_BASE | {"failure_code"},
     EventType.REFUND_REJECTED: _REFUND_BASE | {"rejected_by"},
+    EventType.REFUND_EXPIRED: _REFUND_BASE,  # nobody decided: there is no actor to name
     EventType.TICKET_CREATED: frozenset({"ticket_id", "user_id", "order_id", "priority"}),
 }
 
