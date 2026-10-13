@@ -282,12 +282,12 @@ export default function Page() {
 
   return (
     <main className="mx-auto flex h-screen max-w-2xl flex-col p-4">
-      <header className="flex items-center justify-between pb-3">
-        <h1 className="text-lg font-semibold">Ops Assistant</h1>
-        <div className="flex items-center gap-3 text-sm">
+      <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 pb-3">
+        <h1 className="whitespace-nowrap text-lg font-semibold">Ops Assistant</h1>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
           {llm && <LlmBadge llm={llm} />}
           <button
-            className="text-slate-600 underline"
+            className="whitespace-nowrap text-slate-600 underline"
             onClick={() => {
               setTurns([]);
               setConversationId(undefined);
@@ -295,7 +295,7 @@ export default function Page() {
           >
             New conversation
           </button>
-          <button className="text-slate-600 underline" onClick={() => void signOut()}>
+          <button className="whitespace-nowrap text-slate-600 underline" onClick={() => void signOut()}>
             Sign out
           </button>
         </div>

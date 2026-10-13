@@ -413,7 +413,7 @@ export default function AdminPage() {
     <main className="mx-auto max-w-3xl space-y-4 p-4">
       {header}
 
-      <nav className="flex gap-1 border-b border-slate-200" aria-label="Approval status">
+      <nav className="flex flex-wrap gap-1 border-b border-slate-200" aria-label="Approval status">
         {TABS.map((t) => (
           <button
             key={t}
@@ -421,14 +421,14 @@ export default function AdminPage() {
               setList(null);
               setTab(t);
             }}
-            className={`px-3 py-1.5 text-sm capitalize ${
+            className={`px-2 py-1.5 text-sm capitalize sm:px-3 ${
               tab === t ? "border-b-2 border-slate-900 font-semibold" : "text-slate-600"
             }`}
           >
             {t}
           </button>
         ))}
-        <button className="ml-auto px-3 py-1.5 text-sm text-slate-600 underline" onClick={() => void load()}>
+        <button className="ml-auto px-2 py-1.5 text-sm text-slate-600 underline sm:px-3" onClick={() => void load()}>
           Refresh
         </button>
       </nav>
