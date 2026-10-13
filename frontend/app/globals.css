@@ -1,1 +1,7 @@
 @import "tailwindcss";
+
+/* Edge adds its own reveal and clear buttons to password fields; the Show / Hide button replaces them. */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+}

@@ -15,6 +15,7 @@ import {
   logoutRequest,
   searchKnowledge,
 } from "../../lib/api";
+import { PasswordInput } from "../../components/PasswordInput";
 import { isAborted, messageOf, tokenStore } from "../../lib/auth";
 
 // The admin page contains NO business logic. It lists what the backend returns and sends the
@@ -363,15 +364,7 @@ export default function AdminPage() {
             onChange={(e) => setEmail(e.target.value)}
             required
           />
-          <input
-            className="rounded border border-slate-300 px-3 py-2"
-            placeholder="Password"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
+          <PasswordInput value={password} onChange={setPassword} />
           {loginError && <p className="text-sm text-rose-700">{loginError}</p>}
           <button className="rounded bg-slate-900 px-3 py-2 font-medium text-white">Sign in</button>
         </form>
