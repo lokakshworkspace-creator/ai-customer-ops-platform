@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Approval, Order, Refund
@@ -23,6 +23,37 @@ from app.policy.rules import Rules
 
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
+
+
+async def list_for_admin(
+    session: AsyncSession, *, status: ApprovalStatus, limit: int, offset: int
+) -> tuple[list[Approval], int]:
+    """The admin page's list, with an order that suits each tab (read-only).
+
+    `pending` is a QUEUE: oldest first, so the request that has waited longest is on top. The
+    decided tabs (approved, rejected, expired) are a HISTORY: newest decision first, so what just
+    happened is on top and a page's worth (the page asks for 50) is the recent past, not the oldest
+    rows. The decision time is `decided_at` (set by an admin's decision or by the sweeper); rows
+    without one fall back to `created_at`. Ties break on id so that paging is stable."""
+    total = await session.scalar(
+        select(func.count()).select_from(Approval).where(Approval.status == status)
+    )
+    if status == ApprovalStatus.pending:
+        order = (Approval.created_at, Approval.id)
+    else:
+        order = (
+            func.coalesce(Approval.decided_at, Approval.created_at).desc(),
+            Approval.created_at.desc(),
+            Approval.id,
+        )
+    rows = await session.scalars(
+        select(Approval)
+        .where(Approval.status == status)
+        .order_by(*order)
+        .limit(limit)
+        .offset(offset)
+    )
+    return list(rows), int(total or 0)
 
 
 async def admin_items(

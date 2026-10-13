@@ -17,7 +17,6 @@ from app.api.tool_responses import tool_response
 from app.db.models import User
 from app.db.models.enums import ApprovalStatus, Role
 from app.modules.refunds import approvals_view
-from app.modules.refunds import repo as refunds_repo
 from app.policy.rules import get_rules
 from app.policy.types import Actor
 from app.tools.context import ToolContext
@@ -40,7 +39,7 @@ async def list_approvals(
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> dict:
-    rows, total = await refunds_repo.list_approvals(
+    rows, total = await approvals_view.list_for_admin(
         session, status=status, limit=limit, offset=offset
     )
     return {
