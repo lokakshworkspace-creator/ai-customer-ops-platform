@@ -14,6 +14,41 @@ _VALID_REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{8,64}")
 log = structlog.get_logger(__name__)
 
 
+class SecurityHeadersMiddleware:
+    """Two response headers for the API, whoever calls it (the Next.js page's own headers are set in
+    frontend/next.config.ts):
+
+    * `X-Content-Type-Options: nosniff` on every response: a browser must not guess that a JSON body
+      is something else.
+    * `Cache-Control: no-store` on everything under `/api/`, unless the endpoint set its own: those
+      responses carry bearer tokens (login) and personal data (orders, refunds, approvals), and a
+      shared cache or a browser's back/forward cache must not keep them.
+
+    There is deliberately no CORS middleware and no CORS header anywhere: the browser only talks to
+    the Next.js origin, which proxies /api/*, so a page on any other origin cannot read a response
+    (tests pin that). HSTS is not set: the app is plain HTTP, and the header belongs where TLS
+    ends."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        is_api = scope["path"].startswith("/api/")
+
+        async def send_wrapper(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers["X-Content-Type-Options"] = "nosniff"
+                if is_api and "cache-control" not in headers:
+                    headers["Cache-Control"] = "no-store"
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+
 class RequestIDMiddleware:
     """Assigns a request_id, binds it to every log line for the request, echoes it in the
     response header, and logs one access line. An inbound X-Request-ID is honoured only if
