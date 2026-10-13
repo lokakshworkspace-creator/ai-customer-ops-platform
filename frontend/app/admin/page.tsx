@@ -52,6 +52,19 @@ function ApprovalCard(props: {
   onDecide: (verb: "approve" | "reject") => void;
 }) {
   const { a, note, busy, msg, onNote, onDecide } = props;
+  // Which decision is waiting for a second click. Nothing is sent until "Yes" is pressed; Cancel
+  // and Escape just close the panel. (The backend still decides everything: this only avoids a
+  // mis-click on a button that pays money.)
+  const [confirming, setConfirming] = useState<"approve" | "reject" | null>(null);
+  useEffect(() => {
+    if (!confirming) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setConfirming(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [confirming]);
+  const amount = a.refund ? `${a.refund.amount} ${a.refund.currency}` : "this request";
   return (
     <li className="space-y-2 rounded border border-slate-200 bg-white p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
@@ -102,8 +115,7 @@ function ApprovalCard(props: {
 
       {a.status === "expired" && (
         <div className="rounded bg-slate-50 px-2 py-1 text-xs text-slate-700">
-          Expired on {when(a.decided_at)}: nobody decided in time, nothing was paid
-          {a.decision_reason && <> — “{a.decision_reason}”</>}
+          Expired on {when(a.decided_at)}: nobody decided in time, nothing was paid.
         </div>
       )}
       {a.status !== "pending" && a.status !== "expired" && (
@@ -125,18 +137,55 @@ function ApprovalCard(props: {
           />
           <button
             className="rounded bg-emerald-700 px-3 py-1 font-medium text-white disabled:opacity-50"
-            disabled={busy}
-            onClick={() => onDecide("approve")}
+            disabled={busy || confirming !== null}
+            onClick={() => setConfirming("approve")}
           >
             Approve
           </button>
           <button
             className="rounded bg-rose-700 px-3 py-1 font-medium text-white disabled:opacity-50"
-            disabled={busy}
-            onClick={() => onDecide("reject")}
+            disabled={busy || confirming !== null}
+            onClick={() => setConfirming("reject")}
           >
             Reject
           </button>
+        </div>
+      )}
+
+      {a.status === "pending" && confirming && (
+        <div
+          role="alertdialog"
+          aria-label={`Confirm ${confirming}`}
+          className="space-y-2 rounded border border-amber-300 bg-amber-50 p-3"
+        >
+          <p className="text-slate-800">
+            {confirming === "approve" ? "Approve" : "Reject"} the refund of{" "}
+            <strong>{amount}</strong>
+            {a.refund && <> ({a.refund.reason_code})</>} for order{" "}
+            <span className="font-mono">{short(a.refund?.order_id ?? null)}</span>?
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              autoFocus
+              className="rounded border border-slate-300 bg-white px-3 py-1 font-medium"
+              onClick={() => setConfirming(null)}
+            >
+              Cancel
+            </button>
+            <button
+              className={`rounded px-3 py-1 font-medium text-white disabled:opacity-50 ${
+                confirming === "approve" ? "bg-emerald-700" : "bg-rose-700"
+              }`}
+              disabled={busy}
+              onClick={() => {
+                const verb = confirming;
+                setConfirming(null);
+                onDecide(verb);
+              }}
+            >
+              {confirming === "approve" ? `Yes, approve ${amount}` : `Yes, reject ${amount}`}
+            </button>
+          </div>
         </div>
       )}
 
