@@ -4,7 +4,7 @@ Refund requests, approvals and payouts (Phase 2). Everything here is backed by a
 column of each table names it. The interactive version of the request table is also served by the
 running API at `/docs`.
 
-All endpoints require `Authorization: Bearer <token>` (see the README for logging in).
+All endpoints require `Authorization: Bearer <token>` (see the [guide](guide.md#seeded-logins-local-development-only) for logging in).
 
 ## `POST /api/v1/refunds`
 
