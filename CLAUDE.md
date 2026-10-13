@@ -17,7 +17,7 @@ FastAPI, SQLAlchemy 2 (async), Alembic, Pydantic v2, Postgres 16 + pgvector, Red
 Redpanda (Kafka-compatible), embeddings from Gemini (gemini-embedding-001, 768 dims) over httpx
 (no sentence-transformers),
 LLM via an `LLMClient` interface: the real client is `GeminiLLMClient` over httpx (`LLM_PROVIDER=gemini`);
-a gullible fake is the default and is used by all tests and demos. Frontend: Next.js + Tailwind (one chat page, no business logic).
+a gullible fake is the default and is used by all tests and demos. Frontend: Next.js + Tailwind (the chat page and the /admin page, no business logic; security headers and a CSP in next.config.ts).
 Hand-rolled FSM for orchestration with Postgres checkpoints.
 
 ## Architecture
@@ -44,4 +44,4 @@ ALLOW | REQUIRE_APPROVAL | DENY, always with a reason (written to audit_logs).
 3 Agent + LLM + first UI · 4 RAG · 5 Human approval + events · 6 Resilience, observability, evals · 7 Polish
 
 ## Current phase: Phases 0-6 done. Next: Phase 7 (polish)
-Phase 6 was built as hardening (login rate limiting in Redis, token revocation and logout in Postgres, approval expiry by a sweeper process, observability). The answer-level evals and a re-ranker from the original plan are NOT done and still open. The sweeper (`python -m app.jobs.sweeper`) must be running for approvals to expire.
+Phase 6 was built as hardening (login rate limiting in Redis, token revocation and logout in Postgres, approval expiry by a sweeper process, observability). The answer-level evals and a re-ranker from the original plan are NOT done and still open. The sweeper (`python -m app.jobs.sweeper`) must be running for approvals to expire. A first polish and security pass followed (confirmation before Approve/Reject, newest-first decided tabs, security headers and a CSP with 'unsafe-inline' accepted, API headers, no CORS, docs off in prod, secrets/npm/pip audits): see decision 50.

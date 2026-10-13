@@ -53,6 +53,7 @@ Short architecture decision records (ADRs). Each has the context, the decision, 
 | 47 | [A new refund status releases money without touching the policy engine](#47-a-new-refund-status-releases-money-without-touching-the-policy-engine) | In place (Phase 6) |
 | 48 | [A crash is a clean 500 that carries the request id](#48-a-crash-is-a-clean-500-that-carries-the-request-id) | In place (Phase 6) |
 | 49 | [The pipeline snapshot is an admin endpoint, not part of /health](#49-the-pipeline-snapshot-is-an-admin-endpoint-not-part-of-health) | In place (Phase 6) |
+| 50 | [Browser-facing hardening: headers and a CSP, `'unsafe-inline'` accepted, and a confirmation before money moves](#50-browser-facing-hardening-headers-and-a-csp-unsafe-inline-accepted-and-a-confirmation-before-money-moves) | In place (polish and security pass) |
 
 ---
 
@@ -487,3 +488,20 @@ Short architecture decision records (ADRs). Each has the context, the decision, 
 **It is deliberately not in `/health`.** A liveness probe that fails because a relay is lagging would make the orchestrator restart a healthy API.
 
 **Trade-off.** It is read on demand: nothing pushes an alert, and there is no metrics endpoint or dashboard. The queries run over the unpublished and waiting rows only (partial indexes), but on a very large backlog they are not free.
+
+## 50. Browser-facing hardening: headers and a CSP, `'unsafe-inline'` accepted, and a confirmation before money moves
+
+**Context.** After Phase 6 the backend was hardened, but the pages sent no security headers, `/docs` was open in every environment, an admin could approve a refund with one mis-click, and nobody had looked at the app at phone width or scanned the history for keys.
+
+**Decision.**
+
+* **Headers and a CSP on every page** (`frontend/next.config.ts`): `default-src 'self'` and `'self'` for scripts, styles, images (plus `data:`), fonts and connections; `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'`; plus `nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, a restrictive `Permissions-Policy`, `Cross-Origin-Opener-Policy: same-origin`, and no `X-Powered-By`. **`'unsafe-eval'` and `ws:` exist only in development** (React Refresh and the hot-reload websocket).
+* **`'unsafe-inline'` for scripts is accepted and documented.** Next.js writes small inline scripts into every page (the hydration data). A nonce-based policy would remove the need, but it requires middleware and dynamic rendering of every page, which this two-page app does not otherwise need. The policy still blocks every foreign script origin, plugins, framing, `<base>` and form hijacking; what it does not block is an injected inline script, so it is a second layer behind not injecting anything (React escapes by default, and the app never uses `dangerouslySetInnerHTML`).
+* **At the API:** `nosniff` on every response and `Cache-Control: no-store` under `/api/` (login returns a bearer token, and the rest is personal data); **no CORS at all**, pinned by tests (the browser only talks to the Next.js origin, which proxies `/api/*`, so any cross-origin read is simply refused by the browser); and no `/docs`, `/redoc` or `/openapi.json` when `APP_ENV=prod`. No trusted-host middleware: nothing builds a URL from the `Host` header, and rejecting hosts belongs to the ingress.
+* **No HSTS.** The app is plain HTTP on localhost; the header is wrong there and belongs where TLS ends.
+* **A confirmation before Approve and Reject.** An inline panel on the card, not a modal (no focus trap to get wrong): it names the action, the amount, the reason and the order, puts focus on **Cancel**, and only the explicit "Yes" sends the one request. Cancel and Escape send nothing. It is a guard against a mis-click, not a control: the backend still decides.
+* **The admin list order is the API's.** `approvals_view.list_for_admin`: the Pending tab stays a queue (oldest first), the decided tabs are a history (newest decision first, so the 50 the page asks for are the recent past, not the oldest rows). It lives in `approvals_view` because the refunds repository, which had the oldest-first query, is protected code; the repository function is untouched.
+
+**What was checked.** In real headless Edge, on both `next dev` and a production build: every page fully styled and **0 CSP violations**, the confirmation (focus on Cancel, Cancel and Escape send no request, "Yes" sends exactly one), 0 px of horizontal overflow at 375 px on seven screens (it found one: the admin tab row was 34 px too wide and now wraps), titles and descriptions, the 404, the password toggle. **Negative controls** proved the CSP is enforced (an external fetch, script and image, and a framing attempt were blocked; on the production build a websocket was too, and `eval` from a natively parsed script gave `EvalError`; code run through DevTools' own evaluate is exempt, so that control uses an `srcdoc` iframe). Audits: the full git history (112 commits, 43,620 added lines) scanned for key-shaped strings with only file and commit reported, never a value (nothing real: test fixtures, a code reference and the public dev default; `.env` was never tracked or in history); `npm audit` 0 vulnerabilities in 120 packages; `pip-audit` (installed in a throwaway environment, then deleted) found no known vulnerabilities in the 47 resolved packages.
+
+**Trade-off.** The frontend has no test runner (adding one needs a dependency), so these checks are driver scripts that are not in the repository. Next's headers do not apply to the proxied `/api/*` responses, which carry only the API's own; that is fine for JSON. The dev setup still cannot show real HSTS or TLS behaviour.

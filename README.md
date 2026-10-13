@@ -16,7 +16,7 @@ It is built to show how to put an LLM next to real money without trusting it: th
 
 ![Customer chat: an answer with a "Sources consulted" row, then a refund request waiting for human approval](docs/images/chat-source-and-approval.png)
 
-*The admin page shows why it needs a person, and by when. Approve and Reject call the same endpoints any API client would; the page decides nothing.*
+*The admin page shows why it needs a person, and by when. Approve and Reject ask for a confirmation first (it names the amount), then call the same endpoints any API client would; the page decides nothing.*
 
 ![Admin approvals page: a pending 700 INR refund with its review reason and a decide-by time](docs/images/admin-pending-card.png)
 
@@ -31,8 +31,8 @@ It is built to show how to put an LLM next to real money without trusting it: th
 - **Events go through a transactional outbox.** A state change and its event commit together; a separate relay publishes to Redpanda; a test fails if anything else can publish. A separate consumer finishes the customer's waiting turn on `refund.approved`, `rejected`, `completed`, `failed` or `expired`, de-duplicated in the same transaction as its effect.
 - **Postgres is the source of truth.** Workflow checkpoints, the chat transcript, approvals and token revocations all live there. Redis holds only login-failure counters and may be lost without changing an outcome.
 - **RAG that cannot leak.** Hybrid retrieval (vector plus full text) over 10 documents, with the audience filter inside the SQL: the assistant only ever reads `customer` documents, even when an administrator is chatting. Below an absolute relevance score it says "I'm not sure". The eval is published with its caveats (hybrid did not beat vector-only).
-- **Hardened around the edges.** Failed logins are rate limited per email and IP (`429` with `Retry-After`, fails open if Redis is down); logout revokes the token in Postgres; pending approvals expire after 48 hours through a sweeper process and a late decision is refused; a crash returns a clean `500` that carries its request id.
-- **Tested by breaking it.** **1279 tests** (1248 fast, 31 against a real Redpanda), run against real Postgres built by the real Alembic migrations, plus **116 mutations in 9 lists**: deliberate defects (drop a lock, remove a role check, skip a commit) that the tests must catch. Run them with `python scripts/mutation/run.py`.
+- **Hardened around the edges.** Failed logins are rate limited per email and IP (`429` with `Retry-After`, fails open if Redis is down); logout revokes the token in Postgres; pending approvals expire after 48 hours through a sweeper process and a late decision is refused; a crash returns a clean `500` that carries its request id; every page is served with a Content-Security-Policy and the usual security headers, and the API sets no CORS headers at all.
+- **Tested by breaking it.** **1307 tests** (1276 fast, 31 against a real Redpanda), run against real Postgres built by the real Alembic migrations, plus **116 mutations in 9 lists**: deliberate defects (drop a lock, remove a role check, skip a commit) that the tests must catch. Run them with `python scripts/mutation/run.py`.
 - **Honest records.** 49 logged design decisions, and a report per phase that says what was verified, by whom, and what was not.
 
 ## Architecture
@@ -139,7 +139,7 @@ npm run dev                                             # http://127.0.0.1:3000
 
 1. Ask **"How long does shipping take?"**: the answer comes with a "Sources consulted" row.
 2. Ask **"my order arrived damaged, refund 700"**: 700 is over the 500 automatic limit, so the page shows "Waiting for human approval" and nothing is paid.
-3. Open http://127.0.0.1:3000/admin in another tab and sign in as `admin@example.com` / `password123`. The request is there with its reason; click **Approve**.
+3. Open http://127.0.0.1:3000/admin in another tab and sign in as `admin@example.com` / `password123`. The request is there with its reason; click **Approve**, then confirm with **Yes, approve 700.00 INR**.
 4. Go back to Alice's tab: the final message appears within 15 seconds, without a reload.
 
 **4. Optional: the event-driven parts.** Without these three processes everything above still works (the chat page's poll finishes the turn), but with them the turn finishes by event within moments, and expired approvals are swept. Each in its own terminal, from `backend/`:
@@ -171,7 +171,7 @@ Python 3.12+ · FastAPI · SQLAlchemy 2 (async) · Alembic · Pydantic v2 · Pos
 ## Limitations
 
 - **It runs on a fake model by default.** The built-in model is scripted and deliberately gullible (it exists to attack the backend with). A real Gemini model is optional (`LLM_PROVIDER=gemini` and a key in `.env`); on the free tier expect rate limits and several seconds per call. How a real model behaves in the chat was seen by the project owner in a browser, not by an automated test.
-- **Not production-hardened, and not deployed.** The page runs on the Next.js dev server; there is no HTTPS or deployment setup, and **no CI** (the tests run locally). The payment provider is a simulation.
+- **Not production-hardened, and not deployed.** The page runs on the Next.js dev server; there is no HTTPS or deployment setup (so no HSTS), and **no CI** (the tests run locally). The pages do get security headers and a Content-Security-Policy, but that policy has to allow inline scripts (`'unsafe-inline'`: Next.js writes them, and a nonce setup would need dynamic rendering of every page). The payment provider is a simulation.
 - **The login limiter is per email and IP.** Behind the Next.js dev proxy, which adds no `X-Forwarded-For`, every browser looks like `127.0.0.1`, so there it is effectively per email, and a distributed attack from many IPs is not covered.
 - **The background processes are separate and must be running.** Without the sweeper approvals never expire; nothing alerts when the relay, the consumer or the sweeper stops (an admin endpoint, `/api/v1/admin/pipeline`, shows it on demand).
 - **Retrieval is small and its thresholds were tuned on the questions that measure them.** There are 10 sample documents, no answer-level evaluation and no re-ranker.
